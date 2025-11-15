@@ -1,0 +1,85 @@
+<mujoco model="monster_truck_flip">
+  <option gravity="0 0 -9.81" integrator="RK4" timestep="0.001"/>
+  <compiler angle="radian"/>
+
+  <default>
+    <geom contype="1" conaffinity="1" friction="2.0 0.5 0.02"
+          solimp="0.9 0.9 0.01" solref="0.005 1" density="800"/>
+    <joint damping="0.2"/>
+  </default>
+
+  <visual>
+    <quality shadowsize="4096"/>
+    <map znear="0.01" zfar="20"/>
+  </visual>
+
+  <worldbody>
+    <!-- Lighting and ground -->
+    <light name="sun" pos="0 0 10" dir="0 0 -1" diffuse="1 1 1"/>
+    <geom name="ground" type="plane" size="10 10 0.1" rgba="0.8 0.8 0.8 1"/>
+
+    <!-- Upside-down monster truck -->
+    <body name="chassis" pos="0 0 0.6" quat="0 1 0 0">
+      <freejoint/>
+
+      <!-- Base rectangular chassis -->
+      <geom type="box" size="0.35 0.25 0.12" rgba="0.6 0.1 0.1 1" mass="350"/>
+
+      <!-- Curved roof dome -->
+      <geom type="ellipsoid" size="0.35 0.25 0.10" pos="0 0 0.10"
+            rgba="0.5 0.1 0.1 1" />
+
+      <!-- Optional windshield -->
+      <geom type="ellipsoid" size="0.20 0.10 0.05" pos="0.15 0 0.15"
+            rgba="0.3 0.3 0.4 0.4"/>
+
+      <!-- Massive, heavy wheels -->
+      <body name="wheel_fl" pos=" 0.35  0.30 -0.20">
+        <joint name="j_fl" type="hinge" axis="0 1 0" damping="4"/>
+        <geom type="cylinder" size="0.20 0.10" euler="1.57 0 0"
+              rgba="0.1 0.1 0.1 1" mass="20"/>
+        <!-- visual marker (no physics) -->
+        <geom name="mark_fl" type="sphere" size="0.02"
+              pos="0 0 0.20" rgba="1 1 1 1"
+              contype="0" conaffinity="0" density="0"/>
+      </body>
+
+      <body name="wheel_fr" pos=" 0.35 -0.30 -0.20">
+        <joint name="j_fr" type="hinge" axis="0 1 0" damping="4"/>
+        <geom type="cylinder" size="0.20 0.10" euler="1.57 0 0"
+              rgba="0.1 0.1 0.1 1" mass="20"/>
+        <!-- visual marker (no physics) -->
+        <geom name="mark_fr" type="sphere" size="0.02"
+              pos="0 0 0.20" rgba="1 1 1 1"
+              contype="0" conaffinity="0" density="0"/>
+      </body>
+
+      <body name="wheel_rl" pos="-0.35  0.30 -0.20">
+        <joint name="j_rl" type="hinge" axis="0 1 0" damping="4"/>
+        <geom type="cylinder" size="0.20 0.10" euler="1.57 0 0"
+              rgba="0.1 0.1 0.1 1" mass="20"/>
+        <!-- visual marker (no physics) -->
+        <geom name="mark_rl" type="sphere" size="0.02"
+              pos="0 0 0.20" rgba="1 1 1 1"
+              contype="0" conaffinity="0" density="0"/>
+      </body>
+
+      <body name="wheel_rr" pos="-0.35 -0.30 -0.20">
+        <joint name="j_rr" type="hinge" axis="0 1 0" damping="4"/>
+        <geom type="cylinder" size="0.20 0.10" euler="1.57 0 0"
+              rgba="0.1 0.1 0.1 1" mass="20"/>
+        <!-- visual marker (no physics) -->
+        <geom name="mark_rr" type="sphere" size="0.02"
+              pos="0 0 0.20" rgba="1 1 1 1"
+              contype="0" conaffinity="0" density="0"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="front_left_motor"  joint="j_fl" gear="450"/>
+    <motor name="front_right_motor" joint="j_fr" gear="450"/>
+    <motor name="rear_left_motor"   joint="j_rl" gear="450"/>
+    <motor name="rear_right_motor"  joint="j_rr" gear="450"/>
+  </actuator>
+</mujoco>
