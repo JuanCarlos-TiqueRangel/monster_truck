@@ -1,0 +1,38 @@
+[0.480s] Invoking command in '/ros_ws/src/training': PYTHONPATH=/ros_ws/build/training/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/install/training/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/training build --build-base /ros_ws/build/training/build install --record /ros_ws/build/training/install.log --single-version-externally-managed install_data
+[0.586s] running egg_info
+[0.587s] creating ../../build/training/training.egg-info
+[0.592s] writing ../../build/training/training.egg-info/PKG-INFO
+[0.592s] writing dependency_links to ../../build/training/training.egg-info/dependency_links.txt
+[0.592s] writing requirements to ../../build/training/training.egg-info/requires.txt
+[0.592s] writing top-level names to ../../build/training/training.egg-info/top_level.txt
+[0.592s] writing manifest file '../../build/training/training.egg-info/SOURCES.txt'
+[0.605s] reading manifest file '../../build/training/training.egg-info/SOURCES.txt'
+[0.605s] writing manifest file '../../build/training/training.egg-info/SOURCES.txt'
+[0.605s] running build
+[0.605s] running build_py
+[0.605s] creating /ros_ws/build/training/build
+[0.605s] creating /ros_ws/build/training/build/lib
+[0.605s] creating /ros_ws/build/training/build/lib/training
+[0.606s] copying training/mujoco_model.py -> /ros_ws/build/training/build/lib/training
+[0.606s] copying training/collect_data.py -> /ros_ws/build/training/build/lib/training
+[0.606s] copying training/__init__.py -> /ros_ws/build/training/build/lib/training
+[0.606s] running install
+[0.608s] running install_lib
+[0.614s] creating /ros_ws/install/training/lib/python3.12/site-packages/training
+[0.614s] copying /ros_ws/build/training/build/lib/training/mujoco_model.py -> /ros_ws/install/training/lib/python3.12/site-packages/training
+[0.614s] copying /ros_ws/build/training/build/lib/training/collect_data.py -> /ros_ws/install/training/lib/python3.12/site-packages/training
+[0.614s] copying /ros_ws/build/training/build/lib/training/__init__.py -> /ros_ws/install/training/lib/python3.12/site-packages/training
+[0.615s] byte-compiling /ros_ws/install/training/lib/python3.12/site-packages/training/mujoco_model.py to mujoco_model.cpython-312.pyc
+[0.615s] byte-compiling /ros_ws/install/training/lib/python3.12/site-packages/training/collect_data.py to collect_data.cpython-312.pyc
+[0.617s] byte-compiling /ros_ws/install/training/lib/python3.12/site-packages/training/__init__.py to __init__.cpython-312.pyc
+[0.617s] running install_data
+[0.617s] creating /ros_ws/install/training/share/ament_index
+[0.617s] creating /ros_ws/install/training/share/ament_index/resource_index
+[0.617s] creating /ros_ws/install/training/share/ament_index/resource_index/packages
+[0.617s] copying resource/training -> /ros_ws/install/training/share/ament_index/resource_index/packages
+[0.617s] copying package.xml -> /ros_ws/install/training/share/training
+[0.617s] running install_egg_info
+[0.624s] Copying ../../build/training/training.egg-info to /ros_ws/install/training/lib/python3.12/site-packages/training-0.0.0-py3.12.egg-info
+[0.624s] running install_scripts
+[0.671s] writing list of installed files to '/ros_ws/build/training/install.log'
+[0.691s] Invoked command in '/ros_ws/src/training' returned '0': PYTHONPATH=/ros_ws/build/training/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/install/training/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/training build --build-base /ros_ws/build/training/build install --record /ros_ws/build/training/install.log --single-version-externally-managed install_data

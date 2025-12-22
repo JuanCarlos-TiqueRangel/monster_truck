@@ -1,0 +1,19 @@
+[0.825s] Invoking command in '/ros_ws/src/control': PYTHONPATH=/ros_ws/build/control/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/install/control/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/control build --build-base /ros_ws/build/control/build install --record /ros_ws/build/control/install.log --single-version-externally-managed install_data
+[0.997s] running egg_info
+[1.008s] writing ../../build/control/control.egg-info/PKG-INFO
+[1.009s] writing dependency_links to ../../build/control/control.egg-info/dependency_links.txt
+[1.009s] writing requirements to ../../build/control/control.egg-info/requires.txt
+[1.009s] writing top-level names to ../../build/control/control.egg-info/top_level.txt
+[1.031s] reading manifest file '../../build/control/control.egg-info/SOURCES.txt'
+[1.032s] writing manifest file '../../build/control/control.egg-info/SOURCES.txt'
+[1.032s] running build
+[1.032s] running build_py
+[1.033s] running install
+[1.037s] running install_lib
+[1.049s] running install_data
+[1.049s] running install_egg_info
+[1.059s] removing '/ros_ws/install/control/lib/python3.12/site-packages/control-0.0.0-py3.12.egg-info' (and everything under it)
+[1.060s] Copying ../../build/control/control.egg-info to /ros_ws/install/control/lib/python3.12/site-packages/control-0.0.0-py3.12.egg-info
+[1.061s] running install_scripts
+[1.143s] writing list of installed files to '/ros_ws/build/control/install.log'
+[1.172s] Invoked command in '/ros_ws/src/control' returned '0': PYTHONPATH=/ros_ws/build/control/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/install/control/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/control build --build-base /ros_ws/build/control/build install --record /ros_ws/build/control/install.log --single-version-externally-managed install_data

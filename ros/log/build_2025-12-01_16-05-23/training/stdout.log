@@ -1,0 +1,36 @@
+running egg_info
+creating ../../build/training/training.egg-info
+writing ../../build/training/training.egg-info/PKG-INFO
+writing dependency_links to ../../build/training/training.egg-info/dependency_links.txt
+writing requirements to ../../build/training/training.egg-info/requires.txt
+writing top-level names to ../../build/training/training.egg-info/top_level.txt
+writing manifest file '../../build/training/training.egg-info/SOURCES.txt'
+reading manifest file '../../build/training/training.egg-info/SOURCES.txt'
+writing manifest file '../../build/training/training.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /ros_ws/build/training/build
+creating /ros_ws/build/training/build/lib
+creating /ros_ws/build/training/build/lib/training
+copying training/mujoco_model.py -> /ros_ws/build/training/build/lib/training
+copying training/collect_data.py -> /ros_ws/build/training/build/lib/training
+copying training/__init__.py -> /ros_ws/build/training/build/lib/training
+running install
+running install_lib
+creating /ros_ws/install/training/lib/python3.12/site-packages/training
+copying /ros_ws/build/training/build/lib/training/mujoco_model.py -> /ros_ws/install/training/lib/python3.12/site-packages/training
+copying /ros_ws/build/training/build/lib/training/collect_data.py -> /ros_ws/install/training/lib/python3.12/site-packages/training
+copying /ros_ws/build/training/build/lib/training/__init__.py -> /ros_ws/install/training/lib/python3.12/site-packages/training
+byte-compiling /ros_ws/install/training/lib/python3.12/site-packages/training/mujoco_model.py to mujoco_model.cpython-312.pyc
+byte-compiling /ros_ws/install/training/lib/python3.12/site-packages/training/collect_data.py to collect_data.cpython-312.pyc
+byte-compiling /ros_ws/install/training/lib/python3.12/site-packages/training/__init__.py to __init__.cpython-312.pyc
+running install_data
+creating /ros_ws/install/training/share/ament_index
+creating /ros_ws/install/training/share/ament_index/resource_index
+creating /ros_ws/install/training/share/ament_index/resource_index/packages
+copying resource/training -> /ros_ws/install/training/share/ament_index/resource_index/packages
+copying package.xml -> /ros_ws/install/training/share/training
+running install_egg_info
+Copying ../../build/training/training.egg-info to /ros_ws/install/training/lib/python3.12/site-packages/training-0.0.0-py3.12.egg-info
+running install_scripts
+writing list of installed files to '/ros_ws/build/training/install.log'

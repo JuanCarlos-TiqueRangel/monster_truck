@@ -1,0 +1,19 @@
+[0.805s] Invoking command in '/ros_ws/src/training': PYTHONPATH=/ros_ws/build/training/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/install/training/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/training build --build-base /ros_ws/build/training/build install --record /ros_ws/build/training/install.log --single-version-externally-managed install_data
+[0.974s] running egg_info
+[0.984s] writing ../../build/training/training.egg-info/PKG-INFO
+[0.986s] writing dependency_links to ../../build/training/training.egg-info/dependency_links.txt
+[0.986s] writing requirements to ../../build/training/training.egg-info/requires.txt
+[0.987s] writing top-level names to ../../build/training/training.egg-info/top_level.txt
+[1.008s] reading manifest file '../../build/training/training.egg-info/SOURCES.txt'
+[1.009s] writing manifest file '../../build/training/training.egg-info/SOURCES.txt'
+[1.009s] running build
+[1.009s] running build_py
+[1.010s] running install
+[1.015s] running install_lib
+[1.027s] running install_data
+[1.027s] running install_egg_info
+[1.038s] removing '/ros_ws/install/training/lib/python3.12/site-packages/training-0.0.0-py3.12.egg-info' (and everything under it)
+[1.038s] Copying ../../build/training/training.egg-info to /ros_ws/install/training/lib/python3.12/site-packages/training-0.0.0-py3.12.egg-info
+[1.041s] running install_scripts
+[1.121s] writing list of installed files to '/ros_ws/build/training/install.log'
+[1.141s] Invoked command in '/ros_ws/src/training' returned '0': PYTHONPATH=/ros_ws/build/training/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/install/training/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/training build --build-base /ros_ws/build/training/build install --record /ros_ws/build/training/install.log --single-version-externally-managed install_data
