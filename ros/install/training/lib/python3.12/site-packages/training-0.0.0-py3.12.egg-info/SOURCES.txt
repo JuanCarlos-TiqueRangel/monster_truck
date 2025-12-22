@@ -1,0 +1,16 @@
+package.xml
+setup.cfg
+setup.py
+../../build/training/training.egg-info/PKG-INFO
+../../build/training/training.egg-info/SOURCES.txt
+../../build/training/training.egg-info/dependency_links.txt
+../../build/training/training.egg-info/requires.txt
+../../build/training/training.egg-info/top_level.txt
+../../build/training/training.egg-info/zip-safe
+resource/training
+test/test_copyright.py
+test/test_flake8.py
+test/test_pep257.py
+training/__init__.py
+training/collect_data.py
+training/mujoco_model.py
