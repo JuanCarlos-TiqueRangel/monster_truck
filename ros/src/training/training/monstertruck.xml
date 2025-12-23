@@ -137,10 +137,10 @@
   </worldbody>
 
   <actuator>
-    <motor name="front_left_motor"  joint="j_fl" gear="400"/>
-    <motor name="front_right_motor" joint="j_fr" gear="400"/>
-    <motor name="rear_left_motor"   joint="j_rl" gear="400"/>
-    <motor name="rear_right_motor"  joint="j_rr" gear="400"/>
+    <motor name="front_left_motor"  joint="j_fl" gear="450"/>
+    <motor name="front_right_motor" joint="j_fr" gear="450"/>
+    <motor name="rear_left_motor"   joint="j_rl" gear="450"/>
+    <motor name="rear_right_motor"  joint="j_rr" gear="450"/>
   </actuator>
 
   <!-- IMU sensors: accelerometer + gyro + linear velocity at imu_site -->

@@ -108,6 +108,13 @@ class MPPICarControllerNode(Node):
         # MPPI warm start
         self.plan: Optional[torch.Tensor] = None  # (H,) on device
         self.last_u: float = 0.0
+        
+        self.waiting_post_reset = False
+        self.post_reset_start_time = None
+        self.warned_no_imu = False
+        self.watchdog_fired = False
+
+
 
         # Control timer
         self.timer = self.create_timer(self.cfg.ctrl_dt, self.control_timer_cb)
@@ -154,17 +161,8 @@ class MPPICarControllerNode(Node):
             angle_unwrapped = prev_unwrapped + d
         return angle, angle_unwrapped
 
-    # ========================================================
-    # IMU callback: builds [flip_rel, pitch_rate]
-    # ========================================================
-    def imu_cb(self, msg: Imu):
-        # time (only needed if you want logs; MPPI only cares about state)
-        stamp = msg.header.stamp
-        t = stamp.sec + stamp.nanosec * 1e-9
-        if self.t0 is None:
-            self.t0 = t
 
-        # orientation
+    def imu_cb(self, msg: Imu):
         qw = float(msg.orientation.w)
         qx = float(msg.orientation.x)
         qy = float(msg.orientation.y)
@@ -173,10 +171,39 @@ class MPPICarControllerNode(Node):
         R, _ = self.quat_to_R_and_pitch(qw, qx, qy, qz)
         up_x, up_y, up_z = R[0, 2], R[1, 2], R[2, 2]
 
-        # angle in (z,x) plane
         theta = math.atan2(up_x, up_z)
+        pitch_rate = float(msg.angular_velocity.y)
 
-        # unwrap
+        # ---------------------------
+        # POST-RESET ARMING LOGIC
+        # ---------------------------
+        if self.waiting_post_reset:
+            
+            if self.resetting:
+                self.last_state_valid = False
+                return
+            
+            # elapsed = 0.0
+            # if self.post_reset_start_time is not None:
+            #     elapsed = (self.get_clock().now() - self.post_reset_start_time).nanoseconds * 1e-9
+
+            # thresh = 0.8 if elapsed < 1.0 else 0.3
+
+            # Start new episode: set unwrap baseline *now* to avoid atan2 wrap jumps
+            self.prev_theta = theta
+            self.prev_theta_unwrapped = theta
+            self.theta0 = theta
+
+            self.last_flip_rel = 0.0
+            self.last_rate = pitch_rate
+            self.last_state_valid = True
+            self.waiting_post_reset = False
+            self.watchdog_fired = False
+            return
+
+        # ---------------------------
+        # Normal episode logic
+        # ---------------------------
         self.prev_theta, theta_unwrapped = self.unwrap_angle(
             self.prev_theta,
             self.prev_theta_unwrapped,
@@ -184,17 +211,25 @@ class MPPICarControllerNode(Node):
         )
         self.prev_theta_unwrapped = theta_unwrapped
 
-        # reference so flip_rel ~ 0 at start
         if self.theta0 is None:
             self.theta0 = theta_unwrapped
-        flip_rel = theta_unwrapped - self.theta0
 
-        # IMU rates/accels
-        pitch_rate = float(msg.angular_velocity.y)  # assuming y = pitch rate
+        flip_rel = theta_unwrapped - self.theta0
+        flip_rel = max(-math.pi, min(math.pi, flip_rel))  # clamp to [-pi, pi]
 
         self.last_flip_rel = flip_rel
         self.last_rate = pitch_rate
         self.last_state_valid = True
+
+
+
+
+
+
+
+
+
+
 
     # ========================================================
     # Torch helpers: angdiff, stage cost, GP step
@@ -303,27 +338,52 @@ class MPPICarControllerNode(Node):
     # Control timer callback
     # ========================================================
     def control_timer_cb(self):
-        # If we are currently resetting, just send 0 and wait
-        if self.resetting:
+        # -----------------------------
+        # Watchdog: never get stuck
+        # -----------------------------
+        if self.waiting_post_reset and (not self.resetting) and (self.post_reset_start_time is not None):
+            elapsed = (self.get_clock().now() - self.post_reset_start_time).nanoseconds * 1e-9
+            if (elapsed > 3.0) and (not self.watchdog_fired):
+                self.watchdog_fired = True
+                self.get_logger().warn("Stuck in waiting_post_reset. Forcing reset retry.")
+                self.publish_u(0.0)
+                self.request_reset(force=True)
+                return
+
+
+        # -----------------------------
+        # If we are resetting or waiting to arm, do nothing
+        # -----------------------------
+        if self.resetting or self.waiting_post_reset:
             self.publish_u(0.0)
             return
 
+        # -----------------------------
         # Need a valid state before doing anything
+        # -----------------------------
         if not self.last_state_valid:
-            self.get_logger().warn_once("Waiting for first IMU message...")
+            if not self.warned_no_imu:
+                self.get_logger().warn("Waiting for first IMU message...")
+                self.warned_no_imu = True
             self.publish_u(0.0)
             return
+        else:
+            self.warned_no_imu = False
 
         flip_rel = self.last_flip_rel
         rate = self.last_rate
 
-        # If we consider flip "done", send 0 & trigger reset ONCE
+        # -----------------------------
+        # Stop condition: flip done -> reset
+        # -----------------------------
         if abs(flip_rel) >= self.cfg.flip_stop_abs:
             self.publish_u(0.0)
-            self.request_reset()
+            self.request_reset()  # normal (non-forced) reset
             return
 
+        # -----------------------------
         # MPPI
+        # -----------------------------
         x0 = np.array([flip_rel, rate], dtype=np.float32)
         try:
             u_cmd = self.mppi_action(x0)
@@ -333,6 +393,7 @@ class MPPICarControllerNode(Node):
 
         u_cmd = float(np.clip(u_cmd, self.cfg.u_min, self.cfg.u_max))
         self.publish_u(u_cmd)
+
 
 
 
@@ -363,15 +424,18 @@ class MPPICarControllerNode(Node):
 
 
 
-    def request_reset(self):
+    def request_reset(self, force: bool = False):
         # Avoid multiple concurrent reset calls
         if self.resetting:
             return
+        if self.waiting_post_reset and not force:
+            return
 
         self.resetting = True
+        self.waiting_post_reset = True
+        self.post_reset_start_time = self.get_clock().now()
+        self.watchdog_fired = False
 
-        # Clear local controller state so the next IMU after the reset
-        # will be treated as a fresh episode.
         self._local_reset_state()
 
         req = Trigger.Request()
@@ -383,11 +447,12 @@ class MPPICarControllerNode(Node):
                 self.get_logger().info(f"Reset response: {resp.message}")
             except Exception as e:
                 self.get_logger().warn(f"Reset service call failed: {e}")
-
-            # Allow control loop to resume after reset completes
             self.resetting = False
 
         future.add_done_callback(done_callback)
+
+
+
 
 
 # ============================================================
