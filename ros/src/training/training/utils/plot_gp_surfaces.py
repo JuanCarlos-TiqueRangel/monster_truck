@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
 from gp_dynamics import GPManager   # your GPManager with .load() and .dataset()
+from svgp_dynamics import SVGPManager
 
 def plot_gp_surfaces_with_uncertainty(
     gp,
@@ -55,9 +56,13 @@ def plot_gp_surfaces_with_uncertainty(
     cax_std   = fig.add_subplot(gs[1, 3])   # colorbar for std (bottom)
 
     # ---------  bigger fonts  ----------
-    label_fs = 18   # axis labels
-    title_fs = 24   # subplot titles
-    tick_fs  = 10   # tick labels
+    # label_fs = 18   # axis labels
+    # title_fs = 24   # subplot titles
+    # tick_fs  = 10   # tick labels
+
+    label_fs = 18 * 0.5   # axis labels
+    title_fs = 24 * 0.5  # subplot titles
+    tick_fs  = 10 * 0.5  # tick labels
 
     # ---------- 3) Top row: mean surfaces for each action ----------
     z_min, z_max = np.inf, -np.inf
@@ -200,11 +205,20 @@ def plot_1d_gp_slice_with_uncertainty(
     import matplotlib.pyplot as plt
 
     # -------- style knobs --------
-    label_fs = 26       # axis labels
-    title_fs = 28       # title
-    tick_fs  = 22       # tick labels
-    legend_fs = 20      # legend
-    lw_main  = 4.0      # main line width
+    # label_fs = 26       # axis labels
+    # title_fs = 28       # title
+    # tick_fs  = 22       # tick labels
+    # legend_fs = 20      # legend
+    # lw_main  = 4.0      # main line width
+    # lw_fill  = 0.0      # edge width for fill_between (0 = no edge)
+
+    size_per = 0.5
+
+    label_fs = 26 * size_per       # axis labels
+    title_fs = 28 * size_per       # title
+    tick_fs  = 22 * size_per      # tick labels
+    legend_fs = 20 * size_per     # legend
+    lw_main  = 4.0 * size_per     # main line width
     lw_fill  = 0.0      # edge width for fill_between (0 = no edge)
 
     # ---------- 1) Training data ----------
@@ -295,30 +309,33 @@ def main():
     gp_path = "models/gp_dynamics_1.pt"    # adapt to your path
     gp = GPManager.load(gp_path)
 
+    # gp_path = "models/svgp_dynamics_1.pt"    # adapt to your path
+    # gp = SVGPManager.load(gp_path)
+
     # Top row actions
     a_values = [-1.0, 0.0, 1.0]
     # Bottom plot action (can be one of those, e.g. 1.0)
     a_uncert = 1.0
 
-    # plot_gp_surfaces_with_uncertainty(
-    #     gp,
-    #     a_values=a_values,
-    #     a_uncert=a_uncert,
-    #     action_tolerance=0.5,
-    #     title_zlabel="d(rate)/dt",
-    # )
+    plot_gp_surfaces_with_uncertainty(
+        gp,
+        a_values=a_values,
+        a_uncert=a_uncert,
+        action_tolerance=0.5,
+        title_zlabel="d(rate)/dt",
+    )
 
     # ---- NEW: 1D slice with uncertainty in a separate figure ----
     # e.g. vary flip, with rate=0 and action=1.0
-    plot_1d_gp_slice_with_uncertainty(
-        gp,
-        rate_fixed=0.0,
-        action_fixed=1.0,
-        n_points=200,
-        rate_tolerance=0.5,
-        action_tolerance=0.55,
-        title_prefix="d(rate)/dt",
-    )
+    # plot_1d_gp_slice_with_uncertainty(
+    #     gp,
+    #     rate_fixed=0.0,
+    #     action_fixed=1.0,
+    #     n_points=200,
+    #     rate_tolerance=0.5,
+    #     action_tolerance=0.55,
+    #     title_prefix="d(rate)/dt",
+    # )
 
 
 if __name__ == "__main__":

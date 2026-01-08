@@ -12,14 +12,13 @@ from std_srvs.srv import Trigger
 from std_msgs.msg import Float32
 from sensor_msgs.msg import Imu
 
-from gp_dynamics import GPManager  # <-- your GPManager with .load()
+from svgp_dynamics import SVGPManager   # wherever you put the class
+
 
 from collections import deque
 import os
 import threading
 import csv
-
-from re_train_dynamics_gp import train_dynamics_gp_from_arrays
 
 import time
 import traceback
@@ -49,8 +48,8 @@ class MPPIConfig:
     flip_stop_abs: float = 3.1
 
     # Paths to trained GP models
-    gp_flip_path: str = "models/gp_dynamics_0.pt"
-    gp_rate_path: str = "models/gp_dynamics_1.pt"
+    gp_flip_path: str = "models/svgp_dynamics_0.pt"
+    gp_rate_path: str = "models/svgp_dynamics_1.pt"
 
     # ---- logging ----
     log_dir: str = "logs"
@@ -72,7 +71,7 @@ class MPPIConfig:
     live_plot: bool = True
     live_plot_save_png: bool = True
     
-    episode_timeout_sec: float = 60.0   # hard timeout for an episode (s)
+    episode_timeout_sec: float = 20.0   # hard timeout for an episode (s)
     
     entropy_beta: float = 0.0      # set e.g. 0.05–0.5 to encourage exploration
     entropy_use_log: bool = True   # log-variance entropy (stable)
@@ -81,10 +80,16 @@ class MPPIConfig:
     entropy_dt_scale: bool = True  # scale var by dt^2 (recommended)
     
     # ---- seed dataset (initial offline run) ----
-    seed_npz_path: str = "mujoco_random_run_dt0p1.npz"  # ✅ your file (same folder)
-    seed_episode_id: int = -1                           # fixed “seed episode”
-    keep_seed: bool = True                              # always include seed points
-    retrain_every_episodes: int = 10   # or 20
+    retrain_every_episodes: int = 20   # or 20
+    retrain_force_every_N_episodes: bool = True
+
+
+    # ---- SVGP warm update ----
+    svgp_warm_steps: int = 300         # gradient steps per retrain event
+    svgp_max_buffer: int = 50_000      # keep last N transitions for training
+    svgp_min_new_points: int = 2_000   # need at least this many transitions before first update
+    svgp_batch_size: int = 2048
+
 
 
 
@@ -102,8 +107,9 @@ class MPPICarControllerNode(Node):
         self.get_logger().info(f"Using torch device: {self.device}")
 
         # ----- Load GP models -----
-        self.gp_flip: GPManager = GPManager.load(self.cfg.gp_flip_path)
-        self.gp_rate: GPManager = GPManager.load(self.cfg.gp_rate_path)
+        self.gp_flip: SVGPManager = SVGPManager.load(self.cfg.gp_flip_path, device=self.device)
+        self.gp_rate: SVGPManager = SVGPManager.load(self.cfg.gp_rate_path, device=self.device)
+
         self.gp_flip.device = self.device
         self.gp_rate.device = self.device
 
@@ -158,14 +164,9 @@ class MPPICarControllerNode(Node):
         # Retraining state
         # ==========================
         self.training: bool = False
-        self.reload_pending: bool = False
         self.model_lock = threading.Lock()   # protects GP hot-swap vs predict
         self.log_lock = threading.Lock()     # protects deque access/snapshots
         self.train_thread: Optional[threading.Thread] = None
-        self.reset_after_retrain = False
-
-        # last_train_size is only "committed" AFTER a successful train
-        self.last_train_size = 0
 
         # ==========================
         # Episode timing metrics
@@ -173,6 +174,8 @@ class MPPICarControllerNode(Node):
         # Episode starts when FIRST MPPI action is sent (not at IMU arming)
         self.episode_start_time = None   # rclpy time
         self.episode_started = False
+        
+        self.last_svgp_update_size = 0  # number of logged points when we last updated
 
         self.metrics_path = os.path.join(self.cfg.log_dir, "episode_metrics.csv")
         if not os.path.exists(self.metrics_path):
@@ -188,6 +191,36 @@ class MPPICarControllerNode(Node):
         self.t_hist = []
         if self.cfg.live_plot:
             self._init_live_plot()
+
+
+
+    def _build_training_batch_from_logs(self, start_point_idx: int = 0):
+        flip, rate, u, ep = self._snapshot_dataset()
+        if flip.size < 2:
+            return None, None, None
+
+        dt = float(self.cfg.ctrl_dt)
+
+        # transitions i -> i+1, but only within same episode
+        same_ep = (ep[1:] == ep[:-1])
+
+        # choose which transitions to use (based on new points)
+        # if start_point_idx = P, new points begin at P, so new transitions begin at P-1
+        start_i = max(0, int(start_point_idx) - 1)
+        mask = np.zeros_like(same_ep, dtype=bool)
+        mask[start_i:] = True
+        mask &= same_ep
+
+        idx = np.where(mask)[0]  # transition indices i
+
+        if idx.size == 0:
+            return None, None, None
+
+        X = np.stack([flip[idx], rate[idx], u[idx]], axis=1).astype(np.float32)
+        y_flip = ((flip[idx + 1] - flip[idx]) / dt).astype(np.float32)
+        y_rate = ((rate[idx + 1] - rate[idx]) / dt).astype(np.float32)
+        return X, y_flip, y_rate
+
 
 
     # ========================================================
@@ -449,10 +482,9 @@ class MPPICarControllerNode(Node):
     # ========================================================
     def control_timer_cb(self):
         # Pause MPPI while training/reloading
-        if self.training or self.reload_pending:
+        if self.training:
             self.plan = None
             self.publish_u(0.0)
-            self._reload_models_if_ready()
             return
 
         # Watchdog for arming
@@ -508,7 +540,8 @@ class MPPICarControllerNode(Node):
 
             started = False
             if do_retrain_now:
-                started = self._start_retrain_async(force=True)  # <-- important
+                force = bool(self.cfg.retrain_force_every_N_episodes)
+                started = self._start_retrain_async(force=force)  # <-- important
             else:
                 self.get_logger().info(
                     f"Skipping retrain this episode (ep_num={ep_num}). "
@@ -518,10 +551,9 @@ class MPPICarControllerNode(Node):
             self._record_episode_metric(retrain_started=started)
 
             if started:
-                self.reset_after_retrain = True
+                self.request_reset()
                 return
             else:
-                self.reset_after_retrain = False
                 self.request_reset()
                 return
 
@@ -575,140 +607,181 @@ class MPPICarControllerNode(Node):
         out = os.path.join(self.cfg.log_dir, f"dataset_ep{self.episode_id:04d}.npz")
         np.savez_compressed(out, flip=flip, rate=rate, u=u, episode_id=ep, dt=np.array(self.cfg.ctrl_dt, dtype=np.float32))
         self.get_logger().info(f"Saved dataset snapshot: {out}")
+        
 
     def _start_retrain_async(self, force: bool = False) -> bool:
         if self.training:
-            self.get_logger().info("Retrain requested but training is already running; skipping.")
             return False
 
         with self.log_lock:
-            n = len(self.log_flip)
+            n_points = len(self.log_flip)
 
-        # Only enforce these checks if NOT forced
+        n_trans_total = max(0, n_points - 1)
+
         if not force:
-            if n < self.cfg.min_points_to_train:
-                self.get_logger().info(f"Not enough data to retrain yet: {n} < {self.cfg.min_points_to_train}")
+            if n_trans_total < int(self.cfg.svgp_min_new_points):
                 return False
 
-            if (n - self.last_train_size) < self.cfg.min_new_points_between_trains:
-                self.get_logger().info("Not enough new data since last train; skipping.")
+            start_point_idx = int(self.last_svgp_update_size)
+            X_new, _, _ = self._build_training_batch_from_logs(start_point_idx=start_point_idx)
+            n_new_trans = 0 if X_new is None else int(X_new.shape[0])
+            if n_new_trans < int(self.cfg.min_new_points_between_trains):
                 return False
 
-        flip, rate, u, ep = self._snapshot_dataset()
-        self._save_dataset_npz(flip, rate, u, ep)
-
-        # cap training window
-        M = self.cfg.max_points_for_train
-        if len(flip) > M:
-            flip = flip[-M:]
-            rate = rate[-M:]
-            u    = u[-M:]
-            ep   = ep[-M:]
+        # (optional) if force=True and there are 0 transitions total, we can still warm_update
+        # only if the SVGP checkpoint already has a buffer stored.
+        if force and n_trans_total == 0:
+            if self.gp_flip.Xn_train is None or self.gp_flip.Xn_train.size(0) == 0:
+                self.get_logger().info("Force retrain requested but no transitions and no stored SVGP buffer.")
+                return False
 
         self.training = True
-        n_at_start = n
+        n_at_start = int(n_points)
 
         self.train_thread = threading.Thread(
             target=self._train_worker,
-            args=(flip, rate, u, ep, n_at_start),
+            args=(n_at_start, force),
             daemon=True,
         )
         self.train_thread.start()
-        self.get_logger().info("Started GP retraining thread.")
         return True
 
 
 
-    def _train_worker(self, flip, rate, u, ep, n_at_start: int):
+
+
+    def _train_worker(self, n_at_start: int, force: bool = False):
+        """
+        Train/update SVGP models asynchronously.
+
+        Behavior:
+        - Normal (force=False): train ONLY on NEW valid transitions since last update.
+        - Forced  (force=True): if no new transitions, fall back to ALL valid transitions.
+        - If still no transitions and SVGP has a stored replay buffer (from ckpt),
+            do a pure warm_update() with no new data.
+        """
         t0 = time.perf_counter()
+
+        # "new points begin here" (points index, not transitions)
+        start_point_idx = int(self.last_svgp_update_size)
+
         try:
-            gps, _, _ = train_dynamics_gp_from_arrays(
-                flip_arr=flip,
-                rate_arr=rate,
-                u_arr=u,
-                dt=self.cfg.ctrl_dt,
-                episode_id=ep,
-                N_target=self.cfg.N_target_train,
-                kernel=self.cfg.train_kernel,
-                iters=self.cfg.train_iters,
+            # 1) Preferred: only NEW transitions since last update
+            X, y_flip, y_rate = self._build_training_batch_from_logs(start_point_idx=start_point_idx)
 
-                # ✅ Always include your initial seed NPZ points
-                seed_npz_path=self.cfg.seed_npz_path,
-                seed_episode_id=self.cfg.seed_episode_id,
-                keep_seed=self.cfg.keep_seed,
-            )
+            # 2) If forced and there were no new valid transitions, fall back to ALL transitions
+            if X is None and force:
+                self.get_logger().warn(
+                    "Force retrain: no NEW valid transitions. Falling back to ALL valid transitions."
+                )
+                X, y_flip, y_rate = self._build_training_batch_from_logs(start_point_idx=0)
 
+            # 3) If still nothing, attempt pure warm_update using existing SVGP buffers (if present)
+            if X is None:
+                with self.model_lock:
+                    has_buf = (
+                        getattr(self.gp_flip, "Xn_train", None) is not None
+                        and self.gp_flip.Xn_train.numel() > 0
+                        and getattr(self.gp_rate, "Xn_train", None) is not None
+                        and self.gp_rate.Xn_train.numel() > 0
+                    )
 
+                    if not has_buf:
+                        self.get_logger().info(
+                            "SVGP update skipped: no valid transitions available and no stored SVGP replay buffer."
+                        )
+                        return
 
-            os.makedirs("models", exist_ok=True)
+                    self.get_logger().warn(
+                        "Force retrain: no transitions available. Running warm_update() on stored SVGP buffer only."
+                    )
 
-            # atomic save: write tmp then replace
-            for d, gp in enumerate(gps):
-                tmp_path = f"models/gp_dynamics_{d}.pt.tmp"
-                out_path = f"models/gp_dynamics_{d}.pt"
-                gp.save(tmp_path)
-                os.replace(tmp_path, out_path)
+                    self.gp_flip.warm_update(
+                        steps=int(self.cfg.svgp_warm_steps),
+                        batch_size=int(self.cfg.svgp_batch_size) if hasattr(self.cfg, "svgp_batch_size") else None,
+                    )
+                    self.gp_rate.warm_update(
+                        steps=int(self.cfg.svgp_warm_steps),
+                        batch_size=int(self.cfg.svgp_batch_size) if hasattr(self.cfg, "svgp_batch_size") else None,
+                    )
 
-            # ✅ only now we “commit” the train size
-            self.last_train_size = n_at_start
+                    # Atomic save
+                    os.makedirs(os.path.dirname(self.cfg.gp_flip_path) or ".", exist_ok=True)
+                    tmp_flip = self.cfg.gp_flip_path + ".tmp"
+                    tmp_rate = self.cfg.gp_rate_path + ".tmp"
+                    self.gp_flip.save(tmp_flip)
+                    self.gp_rate.save(tmp_rate)
+                    os.replace(tmp_flip, self.cfg.gp_flip_path)
+                    os.replace(tmp_rate, self.cfg.gp_rate_path)
+
+                # Commit last update size after success
+                self.last_svgp_update_size = int(n_at_start)
+
+                elapsed = time.perf_counter() - t0
+                self.get_logger().info(
+                    f"SVGP warm-update (buffer-only) done in {elapsed:.2f}s | "
+                    f"warm_steps={self.cfg.svgp_warm_steps} | "
+                    f"start_point_idx={start_point_idx} -> n_at_start={n_at_start}"
+                )
+                return
+
+            # Optional cap on how many transitions to train on (keeps time stable)
+            K = int(self.cfg.max_points_for_train)
+            if X.shape[0] > K:
+                X = X[-K:]
+                y_flip = y_flip[-K:]
+                y_rate = y_rate[-K:]
+
+            # 4) Warm-start update in-place (add new data then train)
+            with self.model_lock:
+                self.gp_flip.add_data(
+                    X_new=X,
+                    Y_new=y_flip,
+                    retrain=True,
+                    warm_steps=int(self.cfg.svgp_warm_steps),
+                    max_points=int(self.cfg.svgp_max_buffer),
+                    keep_raw=False,
+                )
+                self.gp_rate.add_data(
+                    X_new=X,
+                    Y_new=y_rate,
+                    retrain=True,
+                    warm_steps=int(self.cfg.svgp_warm_steps),
+                    max_points=int(self.cfg.svgp_max_buffer),
+                    keep_raw=False,
+                )
+
+                # Atomic checkpoint save
+                os.makedirs(os.path.dirname(self.cfg.gp_flip_path) or ".", exist_ok=True)
+                tmp_flip = self.cfg.gp_flip_path + ".tmp"
+                tmp_rate = self.cfg.gp_rate_path + ".tmp"
+                self.gp_flip.save(tmp_flip)
+                self.gp_rate.save(tmp_rate)
+                os.replace(tmp_flip, self.cfg.gp_flip_path)
+                os.replace(tmp_rate, self.cfg.gp_rate_path)
+
+            # Commit "last update size" ONLY after success
+            self.last_svgp_update_size = int(n_at_start)
 
             elapsed = time.perf_counter() - t0
             self.get_logger().info(
-                f"GP retraining finished in {elapsed:.2f}s | "
-                f"N_full={len(flip)} | N_target={self.cfg.N_target_train} | "
-                f"kernel={self.cfg.train_kernel} | iters={self.cfg.train_iters}"
+                f"SVGP warm-update done in {elapsed:.2f}s | "
+                f"transitions_used={X.shape[0]} | warm_steps={self.cfg.svgp_warm_steps} | "
+                f"start_point_idx={start_point_idx} -> n_at_start={n_at_start} | force={int(force)}"
             )
-
-            # log model fingerprints so you can SEE that they changed
-            try:
-                for d in range(len(gps)):
-                    out_path = f"models/gp_dynamics_{d}.pt"
-                    mtime = os.path.getmtime(out_path)
-                    fsize = os.path.getsize(out_path)
-                    self.get_logger().info(
-                        f"Model[{d}] written: {out_path} | mtime={mtime:.0f} | size={fsize} bytes"
-                    )
-            except Exception as e:
-                self.get_logger().warn(f"Could not stat model files after save: {e}")
-
-            self.reload_pending = True
+            self.get_logger().info("Saved SVGP checkpoints after warm-update.")
 
         except Exception as e:
             elapsed = time.perf_counter() - t0
-            self.get_logger().error(f"Retraining failed after {elapsed:.2f}s: {e}")
+            self.get_logger().error(f"SVGP update failed after {elapsed:.2f}s: {e}")
             self.get_logger().error(traceback.format_exc())
 
         finally:
             self.training = False
 
+
+
             
-            
-
-    def _reload_models_if_ready(self):
-        if not self.reload_pending or self.training:
-            return
-
-        with self.model_lock:
-            self.gp_flip = GPManager.load(self.cfg.gp_flip_path)
-            self.gp_rate = GPManager.load(self.cfg.gp_rate_path)
-            self.gp_flip.device = self.device
-            self.gp_rate.device = self.device
-
-        self.plan = None  # clear warm-start after model swap
-        self.reload_pending = False
-        self.get_logger().info("Reloaded GP models (hot swap).")
-
-        try:
-            for d, p in enumerate([self.cfg.gp_flip_path, self.cfg.gp_rate_path]):
-                self.get_logger().info(
-                    f"Reloaded file[{d}]: {p} | mtime={os.path.getmtime(p):.0f} | size={os.path.getsize(p)} bytes"
-                )
-        except Exception as e:
-            self.get_logger().warn(f"Could not stat model files after reload: {e}")
-
-        if self.reset_after_retrain:
-            self.reset_after_retrain = False
-            self.request_reset()
 
 
     # ==========================
