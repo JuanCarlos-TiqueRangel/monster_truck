@@ -2,3 +2,7 @@
 # Ignore VSCode generated DB files
 .vscode/
 *.vc.db
+
+# Local git bundle backups
+*.bundle
+repo-backup.bundle
