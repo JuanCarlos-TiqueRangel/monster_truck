@@ -1,0 +1,4 @@
+
+# Ignore VSCode generated DB files
+.vscode/
+*.vc.db
