@@ -1,0 +1,85 @@
+[0.000000] (-) TimerEvent: {}
+[0.000519] (control) JobQueued: {'identifier': 'control', 'dependencies': OrderedDict()}
+[0.000619] (training) JobQueued: {'identifier': 'training', 'dependencies': OrderedDict()}
+[0.000702] (control) JobStarted: {'identifier': 'control'}
+[0.008133] (training) JobStarted: {'identifier': 'training'}
+[0.099396] (-) TimerEvent: {}
+[0.199652] (-) TimerEvent: {}
+[0.299976] (-) TimerEvent: {}
+[0.400395] (-) TimerEvent: {}
+[0.484114] (control) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'egg_info', '--egg-base', '../build/control', 'build', '--build-base', '/ros_ws/src/build/control/build', 'install', '--record', '/ros_ws/src/build/control/install.log', '--single-version-externally-managed', 'install_data'], 'cwd': '/ros_ws/src/control', 'env': {'NVIDIA_CTK_LIBCUDA_DIR': '/usr/lib/x86_64-linux-gnu', 'HOSTNAME': 'juan', 'SHLVL': '1', 'LD_LIBRARY_PATH': '/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib', 'HOME': '/root', 'ROS_PYTHON_VERSION': '3', 'ROS_DISTRO': 'jazzy', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'PIP_BREAK_SYSTEM_PACKAGES': '1', 'TERM': 'xterm', 'PATH': '/opt/ros/jazzy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'DISPLAY': ':1', 'LANG': 'C.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:', 'AMENT_PREFIX_PATH': '/opt/ros/jazzy', 'DEBIAN_FRONTEND': 'noninteractive', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET', 'PWD': '/ros_ws/src/build/control', 'LC_ALL': 'C.UTF-8', 'PYTHONPATH': '/ros_ws/src/build/control/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/src/install/control/lib/python3.12/site-packages:/opt/ros/jazzy/lib/python3.12/site-packages', 'NVIDIA_VISIBLE_DEVICES': 'void', 'COLCON': '1', 'CMAKE_PREFIX_PATH': '/opt/ros/jazzy/opt/gz_math_vendor:/opt/ros/jazzy/opt/gz_utils_vendor:/opt/ros/jazzy/opt/gz_cmake_vendor'}, 'shell': False}
+[0.487547] (training) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'egg_info', '--egg-base', '../build/training', 'build', '--build-base', '/ros_ws/src/build/training/build', 'install', '--record', '/ros_ws/src/build/training/install.log', '--single-version-externally-managed', 'install_data'], 'cwd': '/ros_ws/src/training', 'env': {'NVIDIA_CTK_LIBCUDA_DIR': '/usr/lib/x86_64-linux-gnu', 'HOSTNAME': 'juan', 'SHLVL': '1', 'LD_LIBRARY_PATH': '/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib', 'HOME': '/root', 'ROS_PYTHON_VERSION': '3', 'ROS_DISTRO': 'jazzy', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'PIP_BREAK_SYSTEM_PACKAGES': '1', 'TERM': 'xterm', 'PATH': '/opt/ros/jazzy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'DISPLAY': ':1', 'LANG': 'C.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:', 'AMENT_PREFIX_PATH': '/opt/ros/jazzy', 'DEBIAN_FRONTEND': 'noninteractive', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET', 'PWD': '/ros_ws/src/build/training', 'LC_ALL': 'C.UTF-8', 'PYTHONPATH': '/ros_ws/src/build/training/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/src/install/training/lib/python3.12/site-packages:/opt/ros/jazzy/lib/python3.12/site-packages', 'NVIDIA_VISIBLE_DEVICES': 'void', 'COLCON': '1', 'CMAKE_PREFIX_PATH': '/opt/ros/jazzy/opt/gz_math_vendor:/opt/ros/jazzy/opt/gz_utils_vendor:/opt/ros/jazzy/opt/gz_cmake_vendor'}, 'shell': False}
+[0.500441] (-) TimerEvent: {}
+[0.594036] (control) StdoutLine: {'line': b'running egg_info\n'}
+[0.594538] (control) StdoutLine: {'line': b'creating ../build/control/control.egg-info\n'}
+[0.594756] (training) StdoutLine: {'line': b'running egg_info\n'}
+[0.594970] (training) StdoutLine: {'line': b'creating ../build/training/training.egg-info\n'}
+[0.599956] (control) StdoutLine: {'line': b'writing ../build/control/control.egg-info/PKG-INFO\n'}
+[0.600030] (training) StdoutLine: {'line': b'writing ../build/training/training.egg-info/PKG-INFO\n'}
+[0.600071] (control) StdoutLine: {'line': b'writing dependency_links to ../build/control/control.egg-info/dependency_links.txt\n'}
+[0.600304] (control) StdoutLine: {'line': b'writing requirements to ../build/control/control.egg-info/requires.txt\n'}
+[0.600660] (-) TimerEvent: {}
+[0.600716] (control) StdoutLine: {'line': b'writing top-level names to ../build/control/control.egg-info/top_level.txt\n'}
+[0.600756] (training) StdoutLine: {'line': b'writing dependency_links to ../build/training/training.egg-info/dependency_links.txt\n'}
+[0.600789] (training) StdoutLine: {'line': b'writing requirements to ../build/training/training.egg-info/requires.txt\n'}
+[0.600819] (training) StdoutLine: {'line': b'writing top-level names to ../build/training/training.egg-info/top_level.txt\n'}
+[0.600848] (training) StdoutLine: {'line': b"writing manifest file '../build/training/training.egg-info/SOURCES.txt'\n"}
+[0.600877] (control) StdoutLine: {'line': b"writing manifest file '../build/control/control.egg-info/SOURCES.txt'\n"}
+[0.612820] (control) StdoutLine: {'line': b"reading manifest file '../build/control/control.egg-info/SOURCES.txt'\n"}
+[0.613150] (training) StdoutLine: {'line': b"reading manifest file '../build/training/training.egg-info/SOURCES.txt'\n"}
+[0.613197] (control) StdoutLine: {'line': b"writing manifest file '../build/control/control.egg-info/SOURCES.txt'\n"}
+[0.613357] (training) StdoutLine: {'line': b"writing manifest file '../build/training/training.egg-info/SOURCES.txt'\n"}
+[0.613415] (training) StdoutLine: {'line': b'running build\n'}
+[0.613449] (training) StdoutLine: {'line': b'running build_py\n'}
+[0.613479] (training) StdoutLine: {'line': b'creating /ros_ws/src/build/training/build\n'}
+[0.613508] (training) StdoutLine: {'line': b'creating /ros_ws/src/build/training/build/lib\n'}
+[0.613536] (training) StdoutLine: {'line': b'creating /ros_ws/src/build/training/build/lib/training\n'}
+[0.613564] (training) StdoutLine: {'line': b'copying training/mujoco_model.py -> /ros_ws/src/build/training/build/lib/training\n'}
+[0.613593] (control) StdoutLine: {'line': b'running build\n'}
+[0.613621] (control) StdoutLine: {'line': b'running build_py\n'}
+[0.613649] (control) StdoutLine: {'line': b'creating /ros_ws/src/build/control/build\n'}
+[0.613676] (control) StdoutLine: {'line': b'creating /ros_ws/src/build/control/build/lib\n'}
+[0.613704] (control) StdoutLine: {'line': b'creating /ros_ws/src/build/control/build/lib/control\n'}
+[0.613732] (control) StdoutLine: {'line': b'copying control/__init__.py -> /ros_ws/src/build/control/build/lib/control\n'}
+[0.613759] (control) StdoutLine: {'line': b'running install\n'}
+[0.615807] (control) StdoutLine: {'line': b'running install_lib\n'}
+[0.616521] (training) StdoutLine: {'line': b'copying training/collect_data.py -> /ros_ws/src/build/training/build/lib/training\n'}
+[0.617214] (training) StdoutLine: {'line': b'copying training/__init__.py -> /ros_ws/src/build/training/build/lib/training\n'}
+[0.617286] (training) StdoutLine: {'line': b'running install\n'}
+[0.619711] (training) StdoutLine: {'line': b'running install_lib\n'}
+[0.622208] (control) StdoutLine: {'line': b'creating /ros_ws/src/install/control/lib/python3.12/site-packages/control\n'}
+[0.622288] (control) StdoutLine: {'line': b'copying /ros_ws/src/build/control/build/lib/control/__init__.py -> /ros_ws/src/install/control/lib/python3.12/site-packages/control\n'}
+[0.622626] (control) StdoutLine: {'line': b'byte-compiling /ros_ws/src/install/control/lib/python3.12/site-packages/control/__init__.py to __init__.cpython-312.pyc\n'}
+[0.622695] (control) StdoutLine: {'line': b'running install_data\n'}
+[0.622728] (control) StdoutLine: {'line': b'creating /ros_ws/src/install/control/share/ament_index\n'}
+[0.622758] (control) StdoutLine: {'line': b'creating /ros_ws/src/install/control/share/ament_index/resource_index\n'}
+[0.622786] (control) StdoutLine: {'line': b'creating /ros_ws/src/install/control/share/ament_index/resource_index/packages\n'}
+[0.622814] (control) StdoutLine: {'line': b'copying resource/control -> /ros_ws/src/install/control/share/ament_index/resource_index/packages\n'}
+[0.622843] (control) StdoutLine: {'line': b'copying package.xml -> /ros_ws/src/install/control/share/control\n'}
+[0.622871] (control) StdoutLine: {'line': b'running install_egg_info\n'}
+[0.626112] (training) StdoutLine: {'line': b'creating /ros_ws/src/install/training/lib/python3.12/site-packages/training\n'}
+[0.626180] (training) StdoutLine: {'line': b'copying /ros_ws/src/build/training/build/lib/training/mujoco_model.py -> /ros_ws/src/install/training/lib/python3.12/site-packages/training\n'}
+[0.626215] (training) StdoutLine: {'line': b'copying /ros_ws/src/build/training/build/lib/training/collect_data.py -> /ros_ws/src/install/training/lib/python3.12/site-packages/training\n'}
+[0.626271] (training) StdoutLine: {'line': b'copying /ros_ws/src/build/training/build/lib/training/__init__.py -> /ros_ws/src/install/training/lib/python3.12/site-packages/training\n'}
+[0.626675] (training) StdoutLine: {'line': b'byte-compiling /ros_ws/src/install/training/lib/python3.12/site-packages/training/mujoco_model.py to mujoco_model.cpython-312.pyc\n'}
+[0.627199] (training) StdoutLine: {'line': b'byte-compiling /ros_ws/src/install/training/lib/python3.12/site-packages/training/collect_data.py to collect_data.cpython-312.pyc\n'}
+[0.628594] (training) StdoutLine: {'line': b'byte-compiling /ros_ws/src/install/training/lib/python3.12/site-packages/training/__init__.py to __init__.cpython-312.pyc\n'}
+[0.628663] (training) StdoutLine: {'line': b'running install_data\n'}
+[0.628722] (training) StdoutLine: {'line': b'creating /ros_ws/src/install/training/share/ament_index\n'}
+[0.628753] (training) StdoutLine: {'line': b'creating /ros_ws/src/install/training/share/ament_index/resource_index\n'}
+[0.628782] (training) StdoutLine: {'line': b'creating /ros_ws/src/install/training/share/ament_index/resource_index/packages\n'}
+[0.628811] (training) StdoutLine: {'line': b'copying resource/training -> /ros_ws/src/install/training/share/ament_index/resource_index/packages\n'}
+[0.628839] (training) StdoutLine: {'line': b'copying package.xml -> /ros_ws/src/install/training/share/training\n'}
+[0.628868] (training) StdoutLine: {'line': b'running install_egg_info\n'}
+[0.629520] (control) StdoutLine: {'line': b'Copying ../build/control/control.egg-info to /ros_ws/src/install/control/lib/python3.12/site-packages/control-0.0.0-py3.12.egg-info\n'}
+[0.629787] (control) StdoutLine: {'line': b'running install_scripts\n'}
+[0.635647] (training) StdoutLine: {'line': b'Copying ../build/training/training.egg-info to /ros_ws/src/install/training/lib/python3.12/site-packages/training-0.0.0-py3.12.egg-info\n'}
+[0.635864] (training) StdoutLine: {'line': b'running install_scripts\n'}
+[0.675793] (control) StdoutLine: {'line': b"writing list of installed files to '/ros_ws/src/build/control/install.log'\n"}
+[0.679929] (training) StdoutLine: {'line': b"writing list of installed files to '/ros_ws/src/build/training/install.log'\n"}
+[0.688027] (control) CommandEnded: {'returncode': 0}
+[0.698977] (control) JobEnded: {'identifier': 'control', 'rc': 0}
+[0.700838] (training) CommandEnded: {'returncode': 0}
+[0.701462] (-) TimerEvent: {}
+[0.709606] (training) JobEnded: {'identifier': 'training', 'rc': 0}
+[0.710050] (-) EventReactorShutdown: {}
