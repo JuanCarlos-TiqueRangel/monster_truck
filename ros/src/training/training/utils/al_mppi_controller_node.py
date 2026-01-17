@@ -342,10 +342,14 @@ class MPPICarControllerNode(Node):
 
     def stage_cost_torch(self, states: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
         pitch = states[:, 0]
+
+        rate = states[:, 1]
+
         u = actions
         err = self.angdiff_torch(pitch, self.pitch_target_t)
         cost_pitch = 100.0 * err ** 2
         cost_u = 0.01 * u ** 2
+        cost_rate = 2 * rate**2
         return cost_u + cost_pitch
 
 
