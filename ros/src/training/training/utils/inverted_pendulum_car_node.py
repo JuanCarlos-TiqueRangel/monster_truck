@@ -37,8 +37,11 @@ class MPPIConfig:
     num_rollouts: int = 2000
 
     # MPPI hyper-parameters
-    lambda_: float = 1.0
-    sigma: float = 1.6
+    # lambda_: float = 1.0
+    # sigma: float = 1.6
+
+    lambda_: float = 0.4
+    sigma: float = 10.0
 
     # Action bounds
     u_min: float = -1.0
@@ -72,9 +75,9 @@ class MPPIConfig:
     live_plot: bool = True
     live_plot_save_png: bool = True
     
-    episode_timeout_sec: float = 20.0   # hard timeout for an episode (s)
+    episode_timeout_sec: float = 30.0   # hard timeout for an episode (s)
     
-    entropy_beta: float = 0.1      # set e.g. 0.05–0.5 to encourage exploration
+    entropy_beta: float = 0.0      # set e.g. 0.05–0.5 to encourage exploration
     entropy_use_log: bool = True   # log-variance entropy (stable)
     entropy_var_floor: float = 1e-6
     entropy_var_cap: float = 1e2
@@ -85,6 +88,17 @@ class MPPIConfig:
     seed_episode_id: int = -1                           # fixed “seed episode”
     keep_seed: bool = True                              # always include seed points
     retrain_every_episodes: int = 10   # or 20
+    
+    # ---- goal hold (turtle-mode stop) ----
+    goal_tol: float = 0.08          # rad tolerance around target (~4.6 deg)
+    rate_tol: float = 0.6           # rad/s
+    goal_hold_steps: int = 8        # number of consecutive control steps to confirm hold
+    safety_flip_abs: float = 3.1    # keep safety: if something goes crazy, stop/reset
+    
+    du_weight: float = 2.0   # try 0.5–5.0
+    u_weight: float = 0.2    # also raise u penalty for stability
+
+
 
 
 
@@ -188,6 +202,9 @@ class MPPICarControllerNode(Node):
         self.t_hist = []
         if self.cfg.live_plot:
             self._init_live_plot()
+            
+            
+        self.goal_hold_counter = 0
 
 
     # ========================================================
@@ -208,7 +225,7 @@ class MPPICarControllerNode(Node):
             self.fig, self.ax = plt.subplots()
             (self.line,) = self.ax.plot([], [], marker="o")
             self.ax.set_xlabel("Episode")
-            self.ax.set_ylabel("Time to flip [s]")
+            self.ax.set_ylabel("Time to target [s]")
             self.ax.grid(True)
             try:
                 self.fig.canvas.manager.set_window_title("Learning Curve: Episode vs Time-to-Flip")
@@ -340,13 +357,31 @@ class MPPICarControllerNode(Node):
     def angdiff_torch(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         return torch.remainder(a - b + torch.pi, 2 * torch.pi) - torch.pi
 
-    def stage_cost_torch(self, states: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+    # def stage_cost_torch(self, states: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+    #     pitch = states[:, 0]
+    #     u = actions
+    #     err = self.angdiff_torch(pitch, self.pitch_target_t)
+        
+    #     rate = states[:, 1]
+    #     cost_rate = 100.0 * rate ** 2
+    #     cost_pitch = 100.0 * err ** 2
+    #     cost_u = 0.2 * u ** 2
+    #     return cost_u + cost_pitch + cost_rate
+
+
+    def stage_cost_torch(self, states: torch.Tensor, u: torch.Tensor, u_prev: torch.Tensor) -> torch.Tensor:
         pitch = states[:, 0]
-        u = actions
-        err = self.angdiff_torch(pitch, self.pitch_target_t)
-        cost_pitch = 100.0 * err ** 2
-        cost_u = 0.01 * u ** 2
-        return cost_u + cost_pitch
+        rate  = states[:, 1]
+        err   = self.angdiff_torch(pitch, self.pitch_target_t)
+
+        cost_pitch = 100.0 * err**2
+        cost_rate  = 100.0 * rate**2
+        cost_u     = self.cfg.u_weight * u**2
+        cost_du    = self.cfg.du_weight * (u - u_prev)**2
+
+        return cost_pitch + cost_rate + cost_u + cost_du
+
+
 
 
     def gp_step_batch_torch(self, states: torch.Tensor, actions: torch.Tensor):
@@ -413,7 +448,14 @@ class MPPICarControllerNode(Node):
         x0 = torch.as_tensor(x0_np, dtype=torch.float32, device=self.device)
         assert x0.shape == (2,)
 
-        u_init = torch.zeros(H, dtype=torch.float32, device=self.device) if self.plan is None else self.plan
+        # u_init = torch.zeros(H, dtype=torch.float32, device=self.device) if self.plan is None else self.plan
+
+        if self.plan is None:
+            u_init = torch.zeros(H, dtype=torch.float32, device=self.device)
+        else:
+            # receding-horizon shift
+            u_init = torch.cat([self.plan[1:], self.plan[-1:]], dim=0)
+
 
         eps = torch.randn(K, H, device=self.device) * cfg.sigma
         U = torch.clamp(u_init.unsqueeze(0) + eps, cfg.u_min, cfg.u_max)
@@ -423,15 +465,18 @@ class MPPICarControllerNode(Node):
 
         beta = float(self.cfg.entropy_beta)
 
+        u_prev = torch.full((K,), float(self.last_u), device=self.device)  # initial u_{k-1} for all rollouts
+
         for t in range(H):
             u_t = U[:, t]
-            stage = self.stage_cost_torch(states, u_t)
+            stage = self.stage_cost_torch(states, u_t, u_prev)
             states, ent = self.gp_step_batch_torch(states, u_t)
             
             if ent is not None:
                 stage = stage - beta * ent  # maximize entropy
 
             costs = costs + stage
+            u_prev = u_t
 
         J_min = costs.min()
         weights = torch.exp(-(costs - J_min) / cfg.lambda_)
@@ -496,10 +541,57 @@ class MPPICarControllerNode(Node):
                 self.request_reset(force=True)
                 return
 
+        # # -----------------------------
+        # # Stop condition: flip done -> retrain, then reset AFTER reload
+        # # -----------------------------
+        # if abs(flip_rel) >= self.cfg.flip_stop_abs:
+        #     self.publish_u(0.0)
+
+        #     ep_num = self.episode_id + 1  # 1-based
+        #     do_retrain_now = (self.cfg.retrain_every_episodes > 0) and \
+        #                     (ep_num % self.cfg.retrain_every_episodes == 0)
+
+        #     started = False
+        #     if do_retrain_now:
+        #         started = self._start_retrain_async(force=True)  # <-- important
+        #     else:
+        #         self.get_logger().info(
+        #             f"Skipping retrain this episode (ep_num={ep_num}). "
+        #             f"retrain_every_episodes={self.cfg.retrain_every_episodes}"
+        #         )
+
+        #     self._record_episode_metric(retrain_started=started)
+
+        #     if started:
+        #         self.reset_after_retrain = True
+        #         return
+        #     else:
+        #         self.reset_after_retrain = False
+        #         self.request_reset()
+        #         return
+
+
+
         # -----------------------------
-        # Stop condition: flip done -> retrain, then reset AFTER reload
+        # Stop condition: reached target -> (optional retrain) -> reset
+        # (same place as your turtle-mode logic)
         # -----------------------------
-        if abs(flip_rel) >= self.cfg.flip_stop_abs:
+        # Safety stop if we go too far
+        if abs(flip_rel) >= self.cfg.safety_flip_abs:
+            self.publish_u(0.0)
+            self.request_reset(force=True)
+            return
+
+        # Goal-hold stop at pitch_target
+        # error wrapped to [-pi, pi]
+        err = ((flip_rel - self.cfg.pitch_target + math.pi) % (2 * math.pi)) - math.pi
+
+        if (abs(err) < self.cfg.goal_tol) and (abs(rate) < self.cfg.rate_tol):
+            self.goal_hold_counter += 1
+        else:
+            self.goal_hold_counter = 0
+
+        if self.goal_hold_counter >= self.cfg.goal_hold_steps:
             self.publish_u(0.0)
 
             ep_num = self.episode_id + 1  # 1-based
@@ -508,7 +600,7 @@ class MPPICarControllerNode(Node):
 
             started = False
             if do_retrain_now:
-                started = self._start_retrain_async(force=True)  # <-- important
+                started = self._start_retrain_async(force=True)
             else:
                 self.get_logger().info(
                     f"Skipping retrain this episode (ep_num={ep_num}). "
@@ -524,6 +616,7 @@ class MPPICarControllerNode(Node):
                 self.reset_after_retrain = False
                 self.request_reset()
                 return
+
 
 
 
@@ -753,6 +846,9 @@ class MPPICarControllerNode(Node):
         # reset episode timing
         self.episode_start_time = None
         self.episode_started = False
+        
+        self.goal_hold_counter = 0
+
 
     def request_reset(self, force: bool = False):
         if self.resetting:
