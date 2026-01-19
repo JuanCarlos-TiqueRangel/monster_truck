@@ -341,6 +341,7 @@ def train_dynamics_gp_from_npz(
 
 if __name__ == "__main__":
     # Example usage (adjust npz_path and dt to your experiment):
+    # npz_path = "mujoco_random_run.npz"
     npz_path = "mujoco_random_run.npz"
     dt = 0.1  # your ctrl_dt or average sample time
 
