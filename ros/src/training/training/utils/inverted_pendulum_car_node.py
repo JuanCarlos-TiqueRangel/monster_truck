@@ -33,15 +33,15 @@ import traceback
 class MPPIConfig:
     # Timing
     ctrl_dt: float = 0.1
-    horizon: int = 20
+    horizon: int = 25
     num_rollouts: int = 2000
 
     # MPPI hyper-parameters
     # lambda_: float = 1.0
     # sigma: float = 1.6
 
-    lambda_: float = 0.4
-    sigma: float = 10.0
+    lambda_: float = 1.0
+    sigma: float = 1.6
 
     # Action bounds
     u_min: float = -1.0
@@ -75,7 +75,7 @@ class MPPIConfig:
     live_plot: bool = True
     live_plot_save_png: bool = True
     
-    episode_timeout_sec: float = 30.0   # hard timeout for an episode (s)
+    episode_timeout_sec: float = 300.0   # hard timeout for an episode (s)
     
     entropy_beta: float = 0.0      # set e.g. 0.05–0.5 to encourage exploration
     entropy_use_log: bool = True   # log-variance entropy (stable)
@@ -84,10 +84,10 @@ class MPPIConfig:
     entropy_dt_scale: bool = True  # scale var by dt^2 (recommended)
     
     # ---- seed dataset (initial offline run) ----
-    seed_npz_path: str = "mujoco_random_run_dt0p1.npz"  # ✅ your file (same folder)
+    seed_npz_path: str = "data/mujoco_random_run_dt0p1.npz"  # ✅ your file (same folder)
     seed_episode_id: int = -1                           # fixed “seed episode”
     keep_seed: bool = True                              # always include seed points
-    retrain_every_episodes: int = 10   # or 20
+    retrain_every_episodes: int = 100   # or 20
     
     # ---- goal hold (turtle-mode stop) ----
     goal_tol: float = 0.08          # rad tolerance around target (~4.6 deg)
@@ -95,9 +95,23 @@ class MPPIConfig:
     goal_hold_steps: int = 8        # number of consecutive control steps to confirm hold
     safety_flip_abs: float = 3.1    # keep safety: if something goes crazy, stop/reset
     
-    du_weight: float = 2.0   # try 0.5–5.0
-    u_weight: float = 0.2    # also raise u penalty for stability
+    du_weight: float = 5.0   # try 0.5–5.0
+    u_weight: float = 0.01    # also raise u penalty for stability
 
+
+    cost_w = {
+            "angle": 5.0,         # overall angle importance
+            "angle_k": 2.0,       # tanh steepness
+            "rate": 0.5,          # baseline rate penalty
+            "stop_boost": 8.0,    # extra braking near goal
+            "stop_alpha": 8.0,    # how local the boost is (bigger = more local)
+            "energy": 0.05,       # u^2
+            "du": 0.2,            # (u-u_prev)^2
+            "time": 0.05,         # constant per step
+            "steady_bonus": 50.0, # big reward for being stable at target
+            "hold_ang_tol": 0.08,
+            "hold_rate_tol": 0.6,
+        }
 
 
 
@@ -374,12 +388,48 @@ class MPPICarControllerNode(Node):
         rate  = states[:, 1]
         err   = self.angdiff_torch(pitch, self.pitch_target_t)
 
-        cost_pitch = 100.0 * err**2
-        cost_rate  = 100.0 * rate**2
+        cost_pitch = 10.0 * err**2
+        cost_rate  = 10.0 * rate**2
         cost_u     = self.cfg.u_weight * u**2
         cost_du    = self.cfg.du_weight * (u - u_prev)**2
 
-        return cost_pitch + cost_rate + cost_u + cost_du
+        #return cost_pitch + cost_rate + cost_u + cost_du
+        return cost_pitch + cost_u #+ cost_u + cost_du
+
+
+    # def stage_cost_torch(self, states: torch.Tensor, u: torch.Tensor, u_prev: torch.Tensor) -> torch.Tensor:
+    #     """
+    #     states: (K,2) [flip_rel, rate]
+    #     u:      (K,)
+    #     u_prev: (K,)
+    #     """
+    #     w = self.cfg.cost_w  # dict-like; see config below
+
+    #     flip = states[:, 0]
+    #     rate = states[:, 1]
+
+    #     err = self.angdiff_torch(flip, self.pitch_target_t)   # [-pi, pi]
+    #     dist = torch.abs(err)
+
+    #     # angle term (tanh saturation)
+    #     ang = w["angle"] * torch.tanh(w["angle_k"] * dist).pow(2)
+
+    #     # rate term with near-goal boost
+    #     rate_weight = w["rate"] + w["stop_boost"] * torch.exp(-w["stop_alpha"] * dist)
+    #     vel = rate_weight * rate.pow(2)
+
+    #     # energy + delta-u smoothing
+    #     energy = w["energy"] * u.pow(2)
+    #     du = w["du"] * (u - u_prev).pow(2)
+
+    #     # constant time penalty
+    #     time_cost = w["time"]
+
+    #     # steady bonus (boolean mask)
+    #     steady_mask = (dist < w["hold_ang_tol"]) & (torch.abs(rate) < w["hold_rate_tol"])
+    #     steady = torch.where(steady_mask, -w["steady_bonus"], torch.zeros_like(dist))
+
+    #     return ang + vel + energy + du + time_cost + steady
 
 
 
@@ -482,7 +532,12 @@ class MPPICarControllerNode(Node):
         weights = torch.exp(-(costs - J_min) / cfg.lambda_)
         weights_sum = weights.sum() + 1e-8
 
-        du = (weights.unsqueeze(1) * eps).sum(dim=0) / weights_sum
+        # du = (weights.unsqueeze(1) * eps).sum(dim=0) / weights_sum
+
+        eps_eff = U - u_init.unsqueeze(0)  # (K,H) effective perturbations after clamp
+        du = (weights.unsqueeze(1) * eps_eff).sum(dim=0) / weights_sum
+
+
         u_new = torch.clamp(u_init + du, cfg.u_min, cfg.u_max)
 
         self.plan = u_new.detach()
@@ -540,37 +595,6 @@ class MPPICarControllerNode(Node):
                 self.publish_u(0.0)
                 self.request_reset(force=True)
                 return
-
-        # # -----------------------------
-        # # Stop condition: flip done -> retrain, then reset AFTER reload
-        # # -----------------------------
-        # if abs(flip_rel) >= self.cfg.flip_stop_abs:
-        #     self.publish_u(0.0)
-
-        #     ep_num = self.episode_id + 1  # 1-based
-        #     do_retrain_now = (self.cfg.retrain_every_episodes > 0) and \
-        #                     (ep_num % self.cfg.retrain_every_episodes == 0)
-
-        #     started = False
-        #     if do_retrain_now:
-        #         started = self._start_retrain_async(force=True)  # <-- important
-        #     else:
-        #         self.get_logger().info(
-        #             f"Skipping retrain this episode (ep_num={ep_num}). "
-        #             f"retrain_every_episodes={self.cfg.retrain_every_episodes}"
-        #         )
-
-        #     self._record_episode_metric(retrain_started=started)
-
-        #     if started:
-        #         self.reset_after_retrain = True
-        #         return
-        #     else:
-        #         self.reset_after_retrain = False
-        #         self.request_reset()
-        #         return
-
-
 
         # -----------------------------
         # Stop condition: reached target -> (optional retrain) -> reset

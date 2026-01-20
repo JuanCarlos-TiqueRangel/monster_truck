@@ -30,7 +30,7 @@ class Config:
     refresh_hz: float = 5.0       # plot refresh
     online_plot: bool = False
 
-    save_path: str = "utils/mujoco_random_run.npz"
+    save_path: str = "utils/data/mujoco_random_run.npz"
     # save_path: str = "utils/mujoco_random_run_dt0p2.npz"
     
 

@@ -74,14 +74,14 @@ class MPPIConfig:
     
     episode_timeout_sec: float = 20.0   # hard timeout for an episode (s)
     
-    entropy_beta: float = 0.1      # set e.g. 0.05–0.5 to encourage exploration
+    entropy_beta: float = 0.0      # set e.g. 0.05–0.5 to encourage exploration
     entropy_use_log: bool = True   # log-variance entropy (stable)
     entropy_var_floor: float = 1e-6
     entropy_var_cap: float = 1e2
     entropy_dt_scale: bool = True  # scale var by dt^2 (recommended)
     
     # ---- seed dataset (initial offline run) ----
-    seed_npz_path: str = "mujoco_random_run_dt0p1.npz"  # ✅ your file (same folder)
+    seed_npz_path: str = "data/mujoco_random_run_dt0p1.npz"  # ✅ your file (same folder)
     seed_episode_id: int = -1                           # fixed “seed episode”
     keep_seed: bool = True                              # always include seed points
     retrain_every_episodes: int = 10   # or 20

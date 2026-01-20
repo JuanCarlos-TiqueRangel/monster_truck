@@ -22,7 +22,7 @@ from gp_dynamics import GPManager  # <-- your GPManager with .load()
 class MPPIConfig:
     # Timing
     ctrl_dt: float = 0.1          # [s] controller period (same dt used in GP training)
-    horizon: int = 40             # H
+    horizon: int = 20             # H
     num_rollouts: int = 2000      # K
 
     # MPPI hyper-parameters
@@ -34,7 +34,7 @@ class MPPIConfig:
     u_max: float = 1.0
 
     # Target / stop conditions
-    pitch_target: float = 1.5 #math.pi   # radians
+    pitch_target: float = math.pi   # radians
     flip_stop_abs: float = 3.1  # stop MPPI when |flip_rel| >= this
 
     # Paths to trained GP models
