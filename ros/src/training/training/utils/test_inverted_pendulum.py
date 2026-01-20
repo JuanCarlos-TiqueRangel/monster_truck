@@ -1,34 +1,83 @@
 #!/usr/bin/env python3
+"""
+mppi_residual_all_in_one.py
+
+Modes:
+  1) --mode run
+     Runs the ROS2 MPPI controller and applies a learned residual (TorchScript) near target.
+
+  2) --mode train_residual
+     Trains a residual policy using SB3 SAC in a fast GP-simulated gymnasium env and exports:
+       - models/residual_sac.zip
+       - models/residual_policy.pt  (TorchScript, loadable by the ROS node)
+
+Notes:
+  - The residual policy output is in [-1, 1] and is scaled by cfg.residual_max_delta to produce Δu.
+  - The residual is gated on near-target conditions (|err| and |rate|) to avoid interfering with flip-up.
+
+SB3 export pattern is aligned with SB3 docs (actor.latent_pi -> actor.mu -> Tanh)
+and Torch JIT trace/freeze/optimize workflow. See SB3 "Exporting models".  (docs)
+"""
+
+import os
 import math
+import time
+import csv
+import argparse
+import threading
+import traceback
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
+import torch.nn as nn
 
+# ROS imports (only needed in --mode run)
 import rclpy
 from rclpy.node import Node
 from std_srvs.srv import Trigger
 from std_msgs.msg import Float32
 from sensor_msgs.msg import Imu
 
-from gp_dynamics import GPManager  # <-- your GPManager with .load()
-
 from collections import deque
-import os
-import threading
-import csv
 
+from gp_dynamics import GPManager
 from re_train_dynamics_gp import train_dynamics_gp_from_arrays
 
-import time
-import traceback
+
+# =========================
+# Small utilities
+# =========================
+def wrap_to_pi(x: float) -> float:
+    return (x + math.pi) % (2.0 * math.pi) - math.pi
 
 
-# ============================================================
+def smooth_gate(val: float, on_thresh: float, k: float) -> float:
+    """
+    gate ~ 1 when val < on_thresh, ~0 when val > on_thresh
+    """
+    return 1.0 / (1.0 + math.exp(k * (val - on_thresh)))
+
+
+# Optional fallback architecture (only used if residual_path is a state_dict, not TorchScript)
+class ResidualMLP(nn.Module):
+    def __init__(self, in_dim=4, hid=64):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hid), nn.Tanh(),
+            nn.Linear(hid, hid), nn.Tanh(),
+            nn.Linear(hid, 1),
+            nn.Tanh(),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+# =========================
 # Config
-# ============================================================
-
+# =========================
 @dataclass
 class MPPIConfig:
     # Timing
@@ -61,57 +110,258 @@ class MPPIConfig:
     N_target_train: int = 1_000
     train_kernel: str = "RQ"
     train_iters: int = 300
-
-    # training window cap (keeps retrain time stable)
     max_points_for_train: int = 50_000
-
-    # retrain trigger
     min_new_points_between_trains: int = 500
+    retrain_every_episodes: int = 10
 
-    # ---- live learning curve plot ----
-    live_plot: bool = True
-    live_plot_save_png: bool = True
-    
-    episode_timeout_sec: float = 20.0   # hard timeout for an episode (s)
-    
-    entropy_beta: float = 0.0      # set e.g. 0.05–0.5 to encourage exploration
-    entropy_use_log: bool = True   # log-variance entropy (stable)
+    # ---- episode control ----
+    episode_timeout_sec: float = 20.0
+
+    # ---- entropy exploration (optional) ----
+    entropy_beta: float = 0.0
+    entropy_use_log: bool = True
     entropy_var_floor: float = 1e-6
     entropy_var_cap: float = 1e2
-    entropy_dt_scale: bool = True  # scale var by dt^2 (recommended)
-    
-    # ---- seed dataset (initial offline run) ----
-    seed_npz_path: str = "data/mujoco_random_run_dt0p1.npz"  # ✅ your file (same folder)
-    seed_episode_id: int = -1                           # fixed “seed episode”
-    keep_seed: bool = True                              # always include seed points
-    retrain_every_episodes: int = 10   # or 20
+    entropy_dt_scale: bool = True
 
+    # ---- seed dataset ----
+    seed_npz_path: str = "data/mujoco_random_run_dt0p1.npz"
+    seed_episode_id: int = -1
+    keep_seed: bool = True
+
+    # ---- residual RL overlay ----
+    residual_enabled: bool = True
+    residual_path: str = "models/residual_policy.pt"   # TorchScript preferred
+    residual_max_delta: float = 0.30                   # |Δu| max (scaled by policy output)
+    residual_err_on: float = 0.60                      # rad: turn on near target
+    residual_rate_on: float = 3.0                      # rad/s
+    residual_gate_k: float = 8.0
+    residual_dudt_max: float = 10.0                    # max Δu rate (per sec)
+
+    # Baseline feature for residual input (in ROS + training env)
+    residual_kp_base: float = 0.0
+    residual_kd_base: float = 0.0
 
 
 # ============================================================
-# MPPI Controller Node
+# Training: SB3 SAC on GP-simulated environment (fast)
 # ============================================================
+def export_sac_actor_to_torchscript(model, out_path: str):
+    """
+    Export only the actor as a TorchScript module:
+      actor.latent_pi -> actor.mu -> Tanh
+    This matches the SB3 export doc pattern for SAC actor networks. (SB3 docs)
+    """
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
+    actor = model.policy.actor
+    # Wrap like SB3 doc suggests for export: latent_pi -> mu -> tanh
+    # (SB3 docs show this for ONNX; same module is traceable for TorchScript.)
+    onnxable_actor = torch.nn.Sequential(
+        actor.latent_pi,
+        actor.mu,
+        torch.nn.Tanh(),
+    ).eval()
+
+    obs_shape = model.observation_space.shape
+    dummy = torch.randn(1, *obs_shape)
+
+    traced = torch.jit.trace(onnxable_actor, dummy)
+    frozen = torch.jit.freeze(traced)
+    frozen = torch.jit.optimize_for_inference(frozen)
+    torch.jit.save(frozen, out_path)
+
+
+class ResidualBalanceEnv:
+    """
+    Gymnasium-like API (wrapped later by SB3 DummyVecEnv):
+      state = [pitch, rate]
+      obs   = [sin(err), cos(err), rate, u_base]
+
+    Dynamics are simulated using your GP models:
+      next_pitch = pitch + dt * GP_flip(pitch, rate, u)
+      next_rate  = rate  + dt * GP_rate(pitch, rate, u)
+
+    The agent action is residual a in [-1,1], mapped to Δu = a * residual_max_delta.
+    The residual is gated near target (same idea as in ROS).
+    """
+
+    def __init__(self, cfg: MPPIConfig, device: str = "cpu",
+                 max_steps: int = 200, init_err_range: float = 0.8, init_rate_range: float = 3.0):
+        import gymnasium as gym
+        from gymnasium import spaces
+
+        self.cfg = cfg
+        self.dt = float(cfg.ctrl_dt)
+        self.max_steps = int(max_steps)
+        self.init_err_range = float(init_err_range)
+        self.init_rate_range = float(init_rate_range)
+
+        self.device = torch.device(device)
+
+        self.gp_flip = GPManager.load(cfg.gp_flip_path)
+        self.gp_rate = GPManager.load(cfg.gp_rate_path)
+        self.gp_flip.device = self.device
+        self.gp_rate.device = self.device
+
+        # spaces
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32)
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
+
+        self._step = 0
+        self.pitch = 0.0
+        self.rate = 0.0
+
+        # success criteria
+        self.err_tol = 0.12   # rad
+        self.rate_tol = 0.8   # rad/s
+        self.hold_needed = 10
+        self.hold_count = 0
+
+    def _u_base(self, err: float) -> float:
+        # optional baseline term (default 0,0)
+        u = self.cfg.residual_kp_base * err + self.cfg.residual_kd_base * self.rate
+        return float(np.clip(u, self.cfg.u_min, self.cfg.u_max))
+
+    def _obs(self) -> np.ndarray:
+        err = wrap_to_pi(self.pitch - self.cfg.pitch_target)
+        u_base = self._u_base(err)
+        return np.array([math.sin(err), math.cos(err), self.rate, u_base], dtype=np.float32)
+
+    def reset(self, seed=None, options=None):
+        if seed is not None:
+            np.random.seed(seed)
+
+        # initialize near target (stabilization-focused)
+        err0 = np.random.uniform(-self.init_err_range, self.init_err_range)
+        self.pitch = wrap_to_pi(self.cfg.pitch_target + float(err0))
+        self.rate = float(np.random.uniform(-self.init_rate_range, self.init_rate_range))
+
+        self._step = 0
+        self.hold_count = 0
+        return self._obs(), {}
+
+    @torch.no_grad()
+    def step(self, action: np.ndarray):
+        a = float(np.clip(action[0], -1.0, 1.0))
+
+        err = wrap_to_pi(self.pitch - self.cfg.pitch_target)
+        u_base = self._u_base(err)
+
+        # gate residual near target (same concept as ROS)
+        g_err = smooth_gate(abs(err), self.cfg.residual_err_on, self.cfg.residual_gate_k)
+        g_rate = smooth_gate(abs(self.rate), self.cfg.residual_rate_on, self.cfg.residual_gate_k)
+        g = g_err * g_rate
+
+        du = a * float(self.cfg.residual_max_delta) * float(g)
+        u = float(np.clip(u_base + du, self.cfg.u_min, self.cfg.u_max))
+
+        # GP dynamics
+        X = torch.tensor([[self.pitch, self.rate, u]], dtype=torch.float32, device=self.device)
+        d_pitch, _ = self.gp_flip.predict_torch(X)
+        d_rate, _ = self.gp_rate.predict_torch(X)
+
+        self.pitch = wrap_to_pi(self.pitch + float(d_pitch.item()) * self.dt)
+        self.rate = float(np.clip(self.rate + float(d_rate.item()) * self.dt, -20.0, 20.0))
+
+        self._step += 1
+
+        # reward: encourage holding at target
+        err2 = wrap_to_pi(self.pitch - self.cfg.pitch_target)
+        # smooth near pi via (1 - cos(err))
+        r_theta = -2.0 * (1.0 - math.cos(err2))
+        r_rate = -0.05 * (self.rate ** 2)
+        r_u = -0.02 * (u ** 2)
+        r_du = -0.10 * (du ** 2)
+        reward = float(r_theta + r_rate + r_u + r_du)
+
+        # success bonus if inside tolerance
+        inside = (abs(err2) < self.err_tol) and (abs(self.rate) < self.rate_tol)
+        if inside:
+            self.hold_count += 1
+            reward += 0.5
+        else:
+            self.hold_count = 0
+
+        terminated = (self.hold_count >= self.hold_needed)
+        truncated = (self._step >= self.max_steps)
+
+        return self._obs(), reward, terminated, truncated, {"err": err2, "g": g, "u": u, "du": du}
+
+
+def train_residual_sac(cfg: MPPIConfig, timesteps: int, device: str = "cuda"):
+    """
+    SB3 SAC training that exports:
+      - models/residual_sac.zip
+      - cfg.residual_path  (TorchScript actor)
+    """
+    from stable_baselines3 import SAC
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
+
+    os.makedirs("models", exist_ok=True)
+    os.makedirs(cfg.log_dir, exist_ok=True)
+
+    def make_env():
+        return ResidualBalanceEnv(cfg, device="cpu", max_steps=220, init_err_range=1.0, init_rate_range=4.0)
+
+    vec_env = DummyVecEnv([make_env])
+    vec_env = VecMonitor(vec_env, filename=os.path.join(cfg.log_dir, "residual_monitor.csv"))
+
+    policy_kwargs = dict(
+        net_arch=[64, 64],
+        activation_fn=nn.Tanh,
+    )
+
+    model = SAC(
+        "MlpPolicy",
+        vec_env,
+        learning_rate=3e-4,
+        buffer_size=200_000,
+        batch_size=256,
+        tau=0.005,
+        gamma=0.99,
+        train_freq=1,
+        gradient_steps=1,
+        ent_coef="auto",
+        policy_kwargs=policy_kwargs,
+        verbose=1,
+        device=device,
+        tensorboard_log=os.path.join(cfg.log_dir, "tb_residual_sac"),
+    )
+
+    model.learn(total_timesteps=int(timesteps), progress_bar=True)
+
+    zip_path = os.path.join("models", "residual_sac.zip")
+    model.save(zip_path)
+
+    # Export TorchScript actor (loadable by ROS node)
+    export_sac_actor_to_torchscript(model, cfg.residual_path)
+
+    print(f"[OK] Saved SB3 model: {zip_path}")
+    print(f"[OK] Saved TorchScript residual actor: {cfg.residual_path}")
+
+
+# ============================================================
+# ROS2 MPPI Controller Node (with residual overlay)
+# ============================================================
 class MPPICarControllerNode(Node):
     def __init__(self, cfg: MPPIConfig):
         super().__init__("mppi_car_controller")
         self.cfg = cfg
 
-        # ----- Device -----
-        self.device = torch.device("cuda")
+        # device robust
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.get_logger().info(f"Using torch device: {self.device}")
 
-        # ----- Load GP models -----
+        # Load GP models
         self.gp_flip: GPManager = GPManager.load(self.cfg.gp_flip_path)
         self.gp_rate: GPManager = GPManager.load(self.cfg.gp_rate_path)
         self.gp_flip.device = self.device
         self.gp_rate.device = self.device
 
-        self.pitch_target_t = torch.tensor(
-            self.cfg.pitch_target, dtype=torch.float32, device=self.device
-        )
+        self.pitch_target_t = torch.tensor(self.cfg.pitch_target, dtype=torch.float32, device=self.device)
 
-        # ----- ROS interfaces -----
+        # ROS interfaces
         self.cmd_pub = self.create_publisher(Float32, "cmd_action", 10)
         self.imu_sub = self.create_subscription(Imu, "car_imu", self.imu_cb, 10)
 
@@ -120,33 +370,25 @@ class MPPICarControllerNode(Node):
         while not self.reset_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info("Waiting for reset_car service...")
 
-        # Latest state from IMU
+        # State from IMU
         self.last_flip_rel: float = 0.0
         self.last_rate: float = 0.0
         self.last_state_valid: bool = False
 
-        # For computing flip_rel from quaternion
         self.prev_theta: Optional[float] = None
         self.prev_theta_unwrapped: float = 0.0
         self.theta0: Optional[float] = None
 
-        # MPPI warm start
         self.plan: Optional[torch.Tensor] = None
         self.last_u: float = 0.0
 
-        # Reset / arming logic
+        # Reset logic
         self.waiting_post_reset = False
         self.post_reset_start_time = None
         self.warned_no_imu = False
         self.watchdog_fired = False
 
-        # Timer
-        self.timer = self.create_timer(self.cfg.ctrl_dt, self.control_timer_cb)
-        self.get_logger().info("MPPI Car Controller node initialized.")
-
-        # ==========================
-        # Online dataset buffer
-        # ==========================
+        # dataset buffer
         os.makedirs(self.cfg.log_dir, exist_ok=True)
         self.episode_id: int = 0
         self.log_flip = deque(maxlen=self.cfg.max_log_points)
@@ -154,110 +396,64 @@ class MPPICarControllerNode(Node):
         self.log_u    = deque(maxlen=self.cfg.max_log_points)
         self.log_ep   = deque(maxlen=self.cfg.max_log_points)
 
-        # ==========================
-        # Retraining state
-        # ==========================
+        # retrain state
         self.training: bool = False
         self.reload_pending: bool = False
-        self.model_lock = threading.Lock()   # protects GP hot-swap vs predict
-        self.log_lock = threading.Lock()     # protects deque access/snapshots
+        self.model_lock = threading.Lock()
+        self.log_lock = threading.Lock()
         self.train_thread: Optional[threading.Thread] = None
         self.reset_after_retrain = False
-
-        # last_train_size is only "committed" AFTER a successful train
         self.last_train_size = 0
 
-        # ==========================
-        # Episode timing metrics
-        # ==========================
-        # Episode starts when FIRST MPPI action is sent (not at IMU arming)
-        self.episode_start_time = None   # rclpy time
+        # episode timing
+        self.episode_start_time = None
         self.episode_started = False
-
         self.metrics_path = os.path.join(self.cfg.log_dir, "episode_metrics.csv")
         if not os.path.exists(self.metrics_path):
             with open(self.metrics_path, "w", newline="") as f:
                 w = csv.writer(f)
                 w.writerow(["episode", "flip_time_sec", "retrain_started"])
 
-        # ==========================
-        # Live learning curve plot
-        # ==========================
-        self.live_plot_ok = False
-        self.ep_hist = []
-        self.t_hist = []
-        if self.cfg.live_plot:
-            self._init_live_plot()
+        # residual
+        self.residual_policy = None
+        self.last_du = 0.0
 
+        if self.cfg.residual_enabled and os.path.exists(self.cfg.residual_path):
+            try:
+                self.residual_policy = torch.jit.load(self.cfg.residual_path, map_location=self.device)
+                self.residual_policy.eval()
+                self.get_logger().info(f"Loaded residual policy (TorchScript): {self.cfg.residual_path}")
+            except Exception:
+                # fallback state_dict
+                self.residual_policy = ResidualMLP(in_dim=4, hid=64).to(self.device)
+                self.residual_policy.load_state_dict(torch.load(self.cfg.residual_path, map_location=self.device))
+                self.residual_policy.eval()
+                self.get_logger().info(f"Loaded residual policy state_dict: {self.cfg.residual_path}")
+        else:
+            self.get_logger().info("Residual policy disabled or file not found.")
 
-    # ========================================================
-    # Helpers: episode timing + live plot
-    # ========================================================
+        # timer
+        self.timer = self.create_timer(self.cfg.ctrl_dt, self.control_timer_cb)
+        self.get_logger().info("MPPI Car Controller node initialized.")
+
+    # ------------ live utils ------------
     def _mark_episode_started(self):
-        """Call right before publishing the first MPPI action of an episode."""
         if not self.episode_started:
             self.episode_start_time = self.get_clock().now()
             self.episode_started = True
 
-    def _init_live_plot(self):
-        try:
-            import matplotlib.pyplot as plt
-            self._plt = plt
-
-            plt.ion()
-            self.fig, self.ax = plt.subplots()
-            (self.line,) = self.ax.plot([], [], marker="o")
-            self.ax.set_xlabel("Episode")
-            self.ax.set_ylabel("Time to flip [s]")
-            self.ax.grid(True)
-            try:
-                self.fig.canvas.manager.set_window_title("Learning Curve: Episode vs Time-to-Flip")
-            except Exception:
-                pass
-
-            self.live_plot_ok = True
-            self.get_logger().info("Live plot enabled (matplotlib).")
-        except Exception as e:
-            self.live_plot_ok = False
-            self.get_logger().warn(f"Live plot disabled (matplotlib init failed): {e}")
-
-    def _update_live_plot(self, ep: int, flip_time: float):
-        if not self.live_plot_ok:
-            return
-
-        self.ep_hist.append(ep)
-        self.t_hist.append(flip_time)
-
-        self.line.set_data(self.ep_hist, self.t_hist)
-        self.ax.relim()
-        self.ax.autoscale_view()
-
-        self.fig.canvas.draw_idle()
-        self.fig.canvas.flush_events()
-        self._plt.pause(0.001)
-
-        if self.cfg.live_plot_save_png:
-            out = os.path.join(self.cfg.log_dir, "learning_curve.png")
-            self.fig.savefig(out, dpi=150)
-
-
-    # ========================================================
-    # Helpers: quaternion -> R + pitch, angle unwrap
-    # ========================================================
+    # ------------ quaternion helpers ------------
     @staticmethod
     def quat_to_R_and_pitch(qw, qx, qy, qz):
         R00 = 1 - 2 * (qy * qy + qz * qz)
         R01 = 2 * (qx * qy - qw * qz)
         R02 = 2 * (qx * qz + qw * qy)
-
         R10 = 2 * (qx * qy + qw * qz)
         R11 = 1 - 2 * (qx * qx + qz * qz)
         R12 = 2 * (qy * qz - qw * qx)
-
         R20 = 2 * (qx * qz - qw * qy)
         R21 = 2 * (qy * qz + qw * qx)
         R22 = 1 - 2 * (qx * qx + qy * qy)
-
         pitch = -math.asin(max(-1.0, min(1.0, R20)))
         R = np.array([[R00, R01, R02],
                       [R10, R11, R12],
@@ -288,15 +484,11 @@ class MPPICarControllerNode(Node):
         theta = math.atan2(R[0, 2], R[2, 2])
         pitch_rate = float(msg.angular_velocity.y)
 
-        # ---------------------------
-        # POST-RESET ARMING LOGIC
-        # ---------------------------
         if self.waiting_post_reset:
             if self.resetting:
                 self.last_state_valid = False
                 return
 
-            # only arm when reasonably "ready"
             if up_z > -0.8:
                 self.last_state_valid = False
                 return
@@ -309,17 +501,11 @@ class MPPICarControllerNode(Node):
             self.last_rate = pitch_rate
             self.last_state_valid = True
 
-            # NOTE: episode timing DOES NOT start here anymore
             self.waiting_post_reset = False
             self.watchdog_fired = False
             return
 
-        # ---------------------------
-        # Normal episode logic
-        # ---------------------------
-        self.prev_theta, theta_unwrapped = self.unwrap_angle(
-            self.prev_theta, self.prev_theta_unwrapped, theta
-        )
+        self.prev_theta, theta_unwrapped = self.unwrap_angle(self.prev_theta, self.prev_theta_unwrapped, theta)
         self.prev_theta_unwrapped = theta_unwrapped
 
         if self.theta0 is None:
@@ -332,82 +518,62 @@ class MPPICarControllerNode(Node):
         self.last_rate = pitch_rate
         self.last_state_valid = True
 
-
-    # ========================================================
-    # Torch helpers: angdiff, stage cost, GP step
-    # ========================================================
+    # ------------ torch helpers ------------
     @staticmethod
     def angdiff_torch(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         return torch.remainder(a - b + torch.pi, 2 * torch.pi) - torch.pi
 
     def stage_cost_torch(self, states: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
         pitch = states[:, 0]
-
         rate = states[:, 1]
-
         u = actions
         err = self.angdiff_torch(pitch, self.pitch_target_t)
+
         cost_pitch = 100.0 * err ** 2
         cost_u = 0.01 * u ** 2
-        cost_rate = 2 * rate**2
-        return cost_u + cost_pitch
-
+        cost_rate = 2.0 * rate ** 2
+        return cost_pitch + cost_rate + cost_u
 
     def gp_step_batch_torch(self, states: torch.Tensor, actions: torch.Tensor):
         X = torch.stack([states[:, 0], states[:, 1], actions], dim=-1)
 
-        # lock so reload can't happen mid-predict
         with self.model_lock:
-            # If entropy is OFF, avoid variance work entirely
             if self.cfg.entropy_beta <= 0.0:
                 d_flip_mean, _ = self.gp_flip.predict_torch(X)
                 d_rate_mean, _ = self.gp_rate.predict_torch(X)
                 d_flip_var = None
                 d_rate_var = None
             else:
-                d_flip_mean, d_flip_var = self.gp_flip.predict_torch(X)  # var (NOT std)
-                d_rate_mean, d_rate_var = self.gp_rate.predict_torch(X)  # var (NOT std)
+                d_flip_mean, d_flip_var = self.gp_flip.predict_torch(X)
+                d_rate_mean, d_rate_var = self.gp_rate.predict_torch(X)
 
         dt = float(self.cfg.ctrl_dt)
-
-        # propagate mean dynamics
         next_states = torch.empty_like(states)
         next_states[:, 0] = states[:, 0] + d_flip_mean * dt
         next_states[:, 1] = states[:, 1] + d_rate_mean * dt
         next_states[:, 0].clamp_(-math.pi, math.pi)
         next_states[:, 1].clamp_(-20.0, 20.0)
 
-        # If entropy OFF -> return immediately (no extra compute)
         if self.cfg.entropy_beta <= 0.0:
             return next_states, None
 
-        # --------------------------
-        # Entropy compute (only if ON)
-        # --------------------------
         d_flip_var = torch.clamp(d_flip_var, min=self.cfg.entropy_var_floor, max=self.cfg.entropy_var_cap)
         d_rate_var = torch.clamp(d_rate_var, min=self.cfg.entropy_var_floor, max=self.cfg.entropy_var_cap)
 
-        # variance of next state after integration: Var[x + dt*Δ] = dt^2 Var[Δ]
         if self.cfg.entropy_dt_scale:
             var_next = torch.stack([d_flip_var, d_rate_var], dim=-1) * (dt * dt)
         else:
             var_next = torch.stack([d_flip_var, d_rate_var], dim=-1)
 
-        # entropy proxy (drop constants): 0.5 * sum log(var)
         if self.cfg.entropy_use_log:
-            entropy = 0.5 * torch.log(var_next).sum(dim=-1)    # shape (K,)
+            entropy = 0.5 * torch.log(var_next).sum(dim=-1)
         else:
-            entropy = var_next.sum(dim=-1)                     # shape (K,)
+            entropy = var_next.sum(dim=-1)
 
         entropy = torch.nan_to_num(entropy, nan=0.0, posinf=0.0, neginf=0.0)
         return next_states, entropy
 
-
-
-
-    # ========================================================
-    # MPPI core
-    # ========================================================
+    # ------------ MPPI ------------
     @torch.no_grad()
     def mppi_action(self, x0_np):
         cfg = self.cfg
@@ -415,51 +581,42 @@ class MPPICarControllerNode(Node):
         K = cfg.num_rollouts
 
         x0 = torch.as_tensor(x0_np, dtype=torch.float32, device=self.device)
-        assert x0.shape == (2,)
-
         u_init = torch.zeros(H, dtype=torch.float32, device=self.device) if self.plan is None else self.plan
 
-        eps = torch.randn(K, H, device=self.device) * cfg.sigma
-        U = torch.clamp(u_init.unsqueeze(0) + eps, cfg.u_min, cfg.u_max)
+        eps = torch.randn(K, H, device=self.device) * float(cfg.sigma)
+        U = torch.clamp(u_init.unsqueeze(0) + eps, float(cfg.u_min), float(cfg.u_max))
 
         states = x0.unsqueeze(0).repeat(K, 1)
         costs = torch.zeros(K, dtype=torch.float32, device=self.device)
 
-        beta = float(self.cfg.entropy_beta)
-
+        beta = float(cfg.entropy_beta)
         for t in range(H):
             u_t = U[:, t]
             stage = self.stage_cost_torch(states, u_t)
             states, ent = self.gp_step_batch_torch(states, u_t)
-            
             if ent is not None:
-                stage = stage - beta * ent  # maximize entropy
-
+                stage = stage - beta * ent
             costs = costs + stage
 
         J_min = costs.min()
-        weights = torch.exp(-(costs - J_min) / cfg.lambda_)
+        weights = torch.exp(-(costs - J_min) / float(cfg.lambda_))
         weights_sum = weights.sum() + 1e-8
 
         du = (weights.unsqueeze(1) * eps).sum(dim=0) / weights_sum
-        u_new = torch.clamp(u_init + du, cfg.u_min, cfg.u_max)
+        u_new = torch.clamp(u_init + du, float(cfg.u_min), float(cfg.u_max))
 
-        self.plan = u_new.detach()
+        # receding horizon shift
+        self.plan = torch.cat([u_new[1:], u_new[-1:]], dim=0).detach()
         return float(u_new[0].detach().cpu())
 
-
-    # ========================================================
-    # Control timer callback
-    # ========================================================
+    # ------------ control loop ------------
     def control_timer_cb(self):
-        # Pause MPPI while training/reloading
         if self.training or self.reload_pending:
             self.plan = None
             self.publish_u(0.0)
             self._reload_models_if_ready()
             return
 
-        # Watchdog for arming
         if self.waiting_post_reset and (not self.resetting) and (self.post_reset_start_time is not None):
             elapsed = (self.get_clock().now() - self.post_reset_start_time).nanoseconds * 1e-9
             if (elapsed > 3.0) and (not self.watchdog_fired):
@@ -484,7 +641,6 @@ class MPPICarControllerNode(Node):
         flip_rel = self.last_flip_rel
         rate = self.last_rate
 
-        # Episode timeout: if we started sending actions but haven't flipped, force reset
         if self.episode_start_time is not None:
             elapsed_ep = (self.get_clock().now() - self.episode_start_time).nanoseconds * 1e-9
             if elapsed_ep >= float(self.cfg.episode_timeout_sec):
@@ -492,63 +648,67 @@ class MPPICarControllerNode(Node):
                     f"Episode {int(self.episode_id)} TIMEOUT after {elapsed_ep:.2f}s "
                     f"(limit={self.cfg.episode_timeout_sec:.2f}s). Forcing reset."
                 )
-
-                # record metric at timeout (no retrain triggered by timeout)
                 self._record_episode_metric(retrain_started=False)
-
                 self.publish_u(0.0)
                 self.request_reset(force=True)
                 return
 
-        # -----------------------------
-        # Stop condition: flip done -> retrain, then reset AFTER reload
-        # -----------------------------
         if abs(flip_rel) >= self.cfg.flip_stop_abs:
             self.publish_u(0.0)
 
-            ep_num = self.episode_id + 1  # 1-based
-            do_retrain_now = (self.cfg.retrain_every_episodes > 0) and \
-                            (ep_num % self.cfg.retrain_every_episodes == 0)
+            ep_num = self.episode_id + 1
+            do_retrain_now = (self.cfg.retrain_every_episodes > 0) and (ep_num % self.cfg.retrain_every_episodes == 0)
 
             started = False
             if do_retrain_now:
-                started = self._start_retrain_async(force=True)  # <-- important
-            else:
-                self.get_logger().info(
-                    f"Skipping retrain this episode (ep_num={ep_num}). "
-                    f"retrain_every_episodes={self.cfg.retrain_every_episodes}"
-                )
-
+                started = self._start_retrain_async(force=True)
             self._record_episode_metric(retrain_started=started)
 
             if started:
                 self.reset_after_retrain = True
                 return
-            else:
-                self.reset_after_retrain = False
-                self.request_reset()
-                return
+            self.reset_after_retrain = False
+            self.request_reset()
+            return
 
-
-
-        # -----------------------------
-        # MPPI
-        # -----------------------------
+        # base MPPI
         x0 = np.array([flip_rel, rate], dtype=np.float32)
         try:
-            u_cmd = self.mppi_action(x0)
+            u_base = self.mppi_action(x0)
         except Exception as e:
             self.get_logger().error(f"MPPI error: {e}")
-            u_cmd = 0.0
+            u_base = 0.0
 
-        u_cmd = float(np.clip(u_cmd, self.cfg.u_min, self.cfg.u_max))
+        # residual correction
+        du = 0.0
+        if self.residual_policy is not None:
+            err = wrap_to_pi(float(flip_rel) - float(self.cfg.pitch_target))  # FIXED
+            g_err = smooth_gate(abs(err), self.cfg.residual_err_on, self.cfg.residual_gate_k)
+            g_rate = smooth_gate(abs(float(rate)), self.cfg.residual_rate_on, self.cfg.residual_gate_k)
+            g = g_err * g_rate
 
-        # ✅ episode starts exactly when first MPPI action is sent
+            if g > 1e-3:
+                obs = torch.tensor([math.sin(err), math.cos(err), float(rate), float(u_base)],
+                                   dtype=torch.float32, device=self.device).unsqueeze(0)
+                with torch.no_grad():
+                    du_raw = float(self.residual_policy(obs).squeeze().clamp(-1.0, 1.0).item())
+
+                du = du_raw * float(self.cfg.residual_max_delta) * float(g)
+
+                max_step = float(self.cfg.residual_dudt_max) * float(self.cfg.ctrl_dt)
+                du = float(np.clip(du, self.last_du - max_step, self.last_du + max_step))
+                self.last_du = du
+            else:
+                self.last_du = 0.0
+
+        u_cmd = float(np.clip(float(u_base) + float(du), self.cfg.u_min, self.cfg.u_max))
+
+        # mark episode start exactly when we send first action
         self._mark_episode_started()
 
+        # PUBLISH ONCE (FIXED)
         self.publish_u(u_cmd)
         self._log_step(flip_rel, rate, u_cmd)
-
 
     def publish_u(self, u: float):
         msg = Float32()
@@ -556,10 +716,7 @@ class MPPICarControllerNode(Node):
         self.cmd_pub.publish(msg)
         self.last_u = float(u)
 
-
-    # ==========================
-    # Logging + retraining
-    # ==========================
+    # ------------ logging / dataset ------------
     def _log_step(self, flip_rel: float, rate: float, u: float):
         with self.log_lock:
             self.log_flip.append(float(flip_rel))
@@ -571,15 +728,17 @@ class MPPICarControllerNode(Node):
         with self.log_lock:
             flip = np.asarray(list(self.log_flip), dtype=np.float32)
             rate = np.asarray(list(self.log_rate), dtype=np.float32)
-            u    = np.asarray(list(self.log_u),    dtype=np.float32)
-            ep   = np.asarray(list(self.log_ep),   dtype=np.int64)
+            u    = np.asarray(list(self.log_u), dtype=np.float32)
+            ep   = np.asarray(list(self.log_ep), dtype=np.int64)
         return flip, rate, u, ep
 
     def _save_dataset_npz(self, flip, rate, u, ep):
         out = os.path.join(self.cfg.log_dir, f"dataset_ep{self.episode_id:04d}.npz")
-        np.savez_compressed(out, flip=flip, rate=rate, u=u, episode_id=ep, dt=np.array(self.cfg.ctrl_dt, dtype=np.float32))
+        np.savez_compressed(out, flip=flip, rate=rate, u=u, episode_id=ep,
+                            dt=np.array(self.cfg.ctrl_dt, dtype=np.float32))
         self.get_logger().info(f"Saved dataset snapshot: {out}")
 
+    # ------------ retraining ------------
     def _start_retrain_async(self, force: bool = False) -> bool:
         if self.training:
             self.get_logger().info("Retrain requested but training is already running; skipping.")
@@ -588,12 +747,10 @@ class MPPICarControllerNode(Node):
         with self.log_lock:
             n = len(self.log_flip)
 
-        # Only enforce these checks if NOT forced
         if not force:
             if n < self.cfg.min_points_to_train:
                 self.get_logger().info(f"Not enough data to retrain yet: {n} < {self.cfg.min_points_to_train}")
                 return False
-
             if (n - self.last_train_size) < self.cfg.min_new_points_between_trains:
                 self.get_logger().info("Not enough new data since last train; skipping.")
                 return False
@@ -601,7 +758,6 @@ class MPPICarControllerNode(Node):
         flip, rate, u, ep = self._snapshot_dataset()
         self._save_dataset_npz(flip, rate, u, ep)
 
-        # cap training window
         M = self.cfg.max_points_for_train
         if len(flip) > M:
             flip = flip[-M:]
@@ -621,8 +777,6 @@ class MPPICarControllerNode(Node):
         self.get_logger().info("Started GP retraining thread.")
         return True
 
-
-
     def _train_worker(self, flip, rate, u, ep, n_at_start: int):
         t0 = time.perf_counter()
         try:
@@ -635,58 +789,29 @@ class MPPICarControllerNode(Node):
                 N_target=self.cfg.N_target_train,
                 kernel=self.cfg.train_kernel,
                 iters=self.cfg.train_iters,
-
-                # ✅ Always include your initial seed NPZ points
                 seed_npz_path=self.cfg.seed_npz_path,
                 seed_episode_id=self.cfg.seed_episode_id,
                 keep_seed=self.cfg.keep_seed,
             )
 
-
-
             os.makedirs("models", exist_ok=True)
-
-            # atomic save: write tmp then replace
             for d, gp in enumerate(gps):
                 tmp_path = f"models/gp_dynamics_{d}.pt.tmp"
                 out_path = f"models/gp_dynamics_{d}.pt"
                 gp.save(tmp_path)
                 os.replace(tmp_path, out_path)
 
-            # ✅ only now we “commit” the train size
             self.last_train_size = n_at_start
-
             elapsed = time.perf_counter() - t0
-            self.get_logger().info(
-                f"GP retraining finished in {elapsed:.2f}s | "
-                f"N_full={len(flip)} | N_target={self.cfg.N_target_train} | "
-                f"kernel={self.cfg.train_kernel} | iters={self.cfg.train_iters}"
-            )
-
-            # log model fingerprints so you can SEE that they changed
-            try:
-                for d in range(len(gps)):
-                    out_path = f"models/gp_dynamics_{d}.pt"
-                    mtime = os.path.getmtime(out_path)
-                    fsize = os.path.getsize(out_path)
-                    self.get_logger().info(
-                        f"Model[{d}] written: {out_path} | mtime={mtime:.0f} | size={fsize} bytes"
-                    )
-            except Exception as e:
-                self.get_logger().warn(f"Could not stat model files after save: {e}")
-
+            self.get_logger().info(f"GP retraining finished in {elapsed:.2f}s")
             self.reload_pending = True
 
         except Exception as e:
             elapsed = time.perf_counter() - t0
             self.get_logger().error(f"Retraining failed after {elapsed:.2f}s: {e}")
             self.get_logger().error(traceback.format_exc())
-
         finally:
             self.training = False
-
-            
-            
 
     def _reload_models_if_ready(self):
         if not self.reload_pending or self.training:
@@ -698,54 +823,33 @@ class MPPICarControllerNode(Node):
             self.gp_flip.device = self.device
             self.gp_rate.device = self.device
 
-        self.plan = None  # clear warm-start after model swap
+        self.plan = None
         self.reload_pending = False
         self.get_logger().info("Reloaded GP models (hot swap).")
-
-        try:
-            for d, p in enumerate([self.cfg.gp_flip_path, self.cfg.gp_rate_path]):
-                self.get_logger().info(
-                    f"Reloaded file[{d}]: {p} | mtime={os.path.getmtime(p):.0f} | size={os.path.getsize(p)} bytes"
-                )
-        except Exception as e:
-            self.get_logger().warn(f"Could not stat model files after reload: {e}")
 
         if self.reset_after_retrain:
             self.reset_after_retrain = False
             self.request_reset()
 
-
-    # ==========================
-    # Episode metric recording
-    # ==========================
+    # ------------ episode metric recording ------------
     def _record_episode_metric(self, retrain_started: bool):
         if self.episode_start_time is None:
-            # episode never started (no MPPI action sent), nothing to record
             self.episode_started = False
             return
 
         dt = (self.get_clock().now() - self.episode_start_time).nanoseconds * 1e-9
         ep = int(self.episode_id)
 
-        self.get_logger().info(
-            f"Episode {ep} flip time: {dt:.3f} s | retrain_started={int(retrain_started)}"
-        )
+        self.get_logger().info(f"Episode {ep} flip time: {dt:.3f} s | retrain_started={int(retrain_started)}")
 
         with open(self.metrics_path, "a", newline="") as f:
             w = csv.writer(f)
             w.writerow([ep, float(dt), int(retrain_started)])
 
-        # live plot update
-        self._update_live_plot(ep, float(dt))
-
-        # reset to avoid double logging
         self.episode_start_time = None
         self.episode_started = False
 
-
-    # ==========================
-    # Reset logic
-    # ==========================
+    # ------------ reset logic ------------
     def _local_reset_state(self):
         self.prev_theta = None
         self.prev_theta_unwrapped = 0.0
@@ -753,8 +857,7 @@ class MPPICarControllerNode(Node):
         self.last_state_valid = False
         self.plan = None
         self.last_u = 0.0
-
-        # reset episode timing
+        self.last_du = 0.0  # reset residual rate limiter
         self.episode_start_time = None
         self.episode_started = False
 
@@ -769,9 +872,7 @@ class MPPICarControllerNode(Node):
         self.post_reset_start_time = None
         self.watchdog_fired = False
 
-        # next samples belong to next episode
         self.episode_id += 1
-
         self._local_reset_state()
 
         req = Trigger.Request()
@@ -792,13 +893,24 @@ class MPPICarControllerNode(Node):
 
 
 # ============================================================
-# main()
+# main
 # ============================================================
-def main(args=None):
-    rclpy.init(args=args)
-    cfg = MPPIConfig()
-    node = MPPICarControllerNode(cfg)
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["run", "train_residual"], default="run")
+    parser.add_argument("--timesteps", type=int, default=400_000)
+    parser.add_argument("--train_device", type=str, default="cuda")
+    args = parser.parse_args()
 
+    cfg = MPPIConfig()
+
+    if args.mode == "train_residual":
+        train_residual_sac(cfg, timesteps=args.timesteps, device=args.train_device)
+        return
+
+    # run ROS node
+    rclpy.init()
+    node = MPPICarControllerNode(cfg)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
@@ -806,6 +918,7 @@ def main(args=None):
     finally:
         node.get_logger().info("Shutting down MPPI controller, sending u=0.0")
         node.publish_u(0.0)
+        node.destroy_node()
         rclpy.shutdown()
 
 
