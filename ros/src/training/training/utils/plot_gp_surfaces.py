@@ -306,11 +306,11 @@ def plot_1d_gp_slice_with_uncertainty(
 
 def main():
     # Load your already-trained model (no retrain)
-    # gp_path = "models/gp_dynamics_1.pt"    # adapt to your path
-    # gp = GPManager.load(gp_path)
+    gp_path = "models/gp_dynamics_1.pt"    # adapt to your path
+    gp = GPManager.load(gp_path)
 
-    gp_path = "models/svgp_dynamics_1.pt"    # adapt to your path
-    gp = SVGPManager.load(gp_path)
+    # gp_path = "models/svgp_dynamics_1.pt"    # adapt to your path
+    # gp = SVGPManager.load(gp_path)
 
     # Top row actions
     a_values = [-1.0, 0.0, 1.0]
@@ -321,7 +321,7 @@ def main():
         gp,
         a_values=a_values,
         a_uncert=a_uncert,
-        action_tolerance=0.5,
+        action_tolerance=0.2,
         title_zlabel="d(rate)/dt",
     )
 

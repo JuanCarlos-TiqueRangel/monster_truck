@@ -34,7 +34,7 @@ class MPPIConfig:
     u_max: float = 1.0
 
     # Target / stop conditions
-    pitch_target: float = math.pi   # radians
+    pitch_target: float = math.pi/2.0   # radians
     flip_stop_abs: float = 3.1  # stop MPPI when |flip_rel| >= this
 
     # Paths to trained GP models
@@ -212,7 +212,7 @@ class MPPICarControllerNode(Node):
 
         cost_pitch = 100.0 * err ** 2
         orient_cost = 100.0 * (1.0 + torch.cos(pitch)) ** 2
-        cost_rate = 100.1 * rate ** 2
+        cost_rate = 0.1 * rate ** 2
         cost_u = 0.01 * u ** 2
 
         #return orient_cost + cost_rate + cost_u + cost_pitch
