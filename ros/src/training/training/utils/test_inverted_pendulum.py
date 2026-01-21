@@ -94,7 +94,7 @@ class MPPIConfig:
     u_max: float = 1.0
 
     # Target / stop conditions
-    pitch_target: float = math.pi
+    pitch_target: float = math.pi/2.0 #math.pi
     flip_stop_abs: float = 3.1
 
     # Paths to trained GP models

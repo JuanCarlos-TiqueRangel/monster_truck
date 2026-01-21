@@ -45,7 +45,7 @@ class MPPIConfig:
     u_max: float = 1.0
 
     # Target / stop conditions
-    pitch_target: float = math.pi
+    pitch_target: float = math.pi/2.0
     flip_stop_abs: float = 3.1
 
     # Paths to trained GP models
@@ -84,7 +84,7 @@ class MPPIConfig:
     seed_npz_path: str = "data/mujoco_random_run_dt0p1.npz"  # ✅ your file (same folder)
     seed_episode_id: int = -1                           # fixed “seed episode”
     keep_seed: bool = True                              # always include seed points
-    retrain_every_episodes: int = 10   # or 20
+    retrain_every_episodes: int = 100   # or 20
 
 
 
@@ -347,10 +347,10 @@ class MPPICarControllerNode(Node):
 
         u = actions
         err = self.angdiff_torch(pitch, self.pitch_target_t)
-        cost_pitch = 100.0 * err ** 2
+        cost_pitch = 1.0 * err ** 2
         cost_u = 0.01 * u ** 2
         cost_rate = 2 * rate**2
-        return cost_u + cost_pitch
+        return cost_u + cost_pitch + cost_rate
 
 
     def gp_step_batch_torch(self, states: torch.Tensor, actions: torch.Tensor):

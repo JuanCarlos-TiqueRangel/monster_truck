@@ -23,7 +23,7 @@ class Config:
     # We want a FIXED dataset dt for GP training
     sample_dt: float = 0.1        # [s] dataset sampling + command update rate (10 Hz)
 
-    duration: float = 60.0        # [s] total run time
+    duration: float = 240.0        # [s] total run time
     u_min: float = -1.0
     u_max: float = 1.0
 
