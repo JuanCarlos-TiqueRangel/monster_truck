@@ -97,8 +97,8 @@ def train_dynamics_svgp_from_npz(npz_path: str, dt: float, **kwargs):
 
 
 if __name__ == "__main__":
-    npz_path = "mujoco_random_run_dt0p1.npz"
-    dt = 0.1
+    npz_path = "data/mujoco_random_run_svgp.npz"
+    dt = 0.01
 
     gps, X, Y = train_dynamics_svgp_from_npz(
         npz_path=npz_path,

@@ -21,16 +21,17 @@ import matplotlib.patches as patches
 @dataclass
 class Config:
     # We want a FIXED dataset dt for GP training
-    sample_dt: float = 0.1        # [s] dataset sampling + command update rate (10 Hz)
+    sample_dt: float = 0.01        # [s] dataset sampling + command update rate (10 Hz)
 
-    duration: float = 240.0        # [s] total run time
+    duration: float = 60.0        # [s] total run time
     u_min: float = -1.0
     u_max: float = 1.0
 
     refresh_hz: float = 5.0       # plot refresh
     online_plot: bool = False
 
-    save_path: str = "utils/data/mujoco_random_run.npz"
+    # save_path: str = "utils/data/mujoco_random_run.npz"
+    save_path: str = "utils/data/mujoco_random_run_svgp.npz"
     # save_path: str = "utils/mujoco_random_run_dt0p2.npz"
     
 

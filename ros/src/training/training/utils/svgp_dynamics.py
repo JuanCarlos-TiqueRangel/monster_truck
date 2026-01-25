@@ -373,7 +373,8 @@ class SVGPManager:
         Xn = (X - self.X_mean) / self.X_std
 
         with torch.no_grad(), gpytorch.settings.fast_pred_var():
-            pred = self.likelihood(self.model(Xn))
+            #pred = self.likelihood(self.model(Xn))
+            pred = self.model(Xn)
             mean = pred.mean * self.Y_std + self.Y_mean
             var = pred.variance * (self.Y_std ** 2)
         return mean, var

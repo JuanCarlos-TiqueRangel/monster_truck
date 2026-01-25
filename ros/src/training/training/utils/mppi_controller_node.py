@@ -11,6 +11,8 @@ from rclpy.node import Node
 from std_msgs.msg import Float32
 from sensor_msgs.msg import Imu
 
+import time
+
 from gp_dynamics import GPManager  # <-- your GPManager with .load()
 
 
@@ -303,6 +305,9 @@ class MPPICarControllerNode(Node):
     # Control timer callback
     # ========================================================
     def control_timer_cb(self):
+
+        t0 = time.perf_counter()
+
         # Need a valid state before doing anything
         if not self.last_state_valid:
             self.get_logger().warn_once("Waiting for first IMU message...")
@@ -338,6 +343,10 @@ class MPPICarControllerNode(Node):
         if self.t0 is None:
             self.t0 = t_now
         t_rel = t_now - self.t0
+
+        dtt = time.perf_counter() - t0
+        if dtt > 0.02:
+            self.get_logger().warn(f"control_timer_cb took {dtt*1000:.1f} ms")
 
         # ---- log for summary plots ----
         self.time_log.append(t_rel)
