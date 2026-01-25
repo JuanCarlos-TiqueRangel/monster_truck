@@ -44,7 +44,7 @@ class MPPIConfig:
     u_max: float = 1.0
 
     # Target / stop conditions
-    pitch_target: float = 1.5 #math.pi
+    pitch_target: float = -1.5 #math.pi
     flip_stop_abs: float = 3.1
 
     # Paths to trained GP models
@@ -556,8 +556,6 @@ class MPPICarControllerNode(Node):
             else:
                 self.request_reset()
                 return
-
-
 
         # -----------------------------
         # MPPI
