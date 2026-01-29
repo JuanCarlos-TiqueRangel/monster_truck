@@ -11,6 +11,7 @@ from std_srvs.srv import Trigger
 from std_msgs.msg import Float32
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Odometry
 
 # ============================================================
 # SIMPLE EXPERIMENT FLAG (change this line only)
@@ -74,15 +75,13 @@ class MujocoImuNode(Node):
         # ---------------- Reset once + apply START_FLIPPED ----------------
         mj.mj_resetData(self.model, self.data)
         self.data.ctrl[:] = 0.0
-
-        self._apply_start_pose_flag()  # <-- sets quaternion (upright or flipped)
+        self._apply_start_pose_flag()
 
         # Save initial state used by reset service
         self.init_qpos = self.data.qpos.copy()
         self.init_qvel = self.data.qvel.copy()
 
         # ---------------- Viewer (optional) ----------------
-        # If headless, this may fail; keep it simple: try/except
         self.viewer = None
         try:
             self.viewer = mjviewer.launch_passive(self.model, self.data)
@@ -94,28 +93,26 @@ class MujocoImuNode(Node):
         self.sub_cmd = self.create_subscription(Float32, "cmd_action", self.cmd_action_cb, 10)
 
         self.pub_imu = self.create_publisher(Imu, "car_imu", 10)
-        self.pub_pose = self.create_publisher(PoseStamped, "car_pose", 10)
+        self.pub_odom = self.create_publisher(Odometry, "car_odom", 10)
 
         self.reset_srv = self.create_service(Trigger, "reset_car", self.reset_callback)
-
         self.timer = self.create_timer(self.ctrl_dt, self.timer_cb)
 
         self.get_logger().info(
             f"MujocoImuNode ready. START_FLIPPED={START_FLIPPED}. "
-            "Subscribing /cmd_action, publishing /car_imu and /car_pose."
+            "Subscribing /cmd_action, publishing /car_imu, /car_pose, /car_odom."
         )
 
     # ------------------------------------------------------------
     # Helper: apply upright/flipped pose based on START_FLIPPED
     # ------------------------------------------------------------
     def _apply_start_pose_flag(self):
-        # Choose orientation + a safe starting height
         if START_FLIPPED:
             quat = np.array([0.0, 1.0, 0.0, 0.0], dtype=self.data.qpos.dtype)  # 180deg about X
-            z0 = 0.24  # roof-on-ground-ish (tweak 0.23-0.30)
+            z0 = 0.24
         else:
             quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=self.data.qpos.dtype)  # upright
-            z0 = 0.41  # wheels-on-ground (0.40 + small clearance)
+            z0 = 0.41
 
         # Set base pose (freejoint qpos: x,y,z,qw,qx,qy,qz)
         self.data.qpos[self.free_qpos_adr + 0] = 0.0
@@ -123,11 +120,10 @@ class MujocoImuNode(Node):
         self.data.qpos[self.free_qpos_adr + 2] = z0
         self.data.qpos[self.free_qpos_adr + 3 : self.free_qpos_adr + 7] = quat
 
-        # zero base velocity (optional, helps remove any “drop impulse”)
+        # zero base velocity
         self.data.qvel[self.free_qvel_adr : self.free_qvel_adr + 6] = 0.0
 
         mj.mj_forward(self.model, self.data)
-
 
     # ------------------------------------------------------------
     # ROS callbacks
@@ -138,13 +134,10 @@ class MujocoImuNode(Node):
     def reset_callback(self, request, response):
         mj.mj_resetData(self.model, self.data)
 
-        # Restore the saved initial state (already has the chosen START_FLIPPED pose)
         self.data.qpos[:] = self.init_qpos
         self.data.qvel[:] = self.init_qvel
 
-        # Re-apply flag (optional safety) — and this already does mj_forward()
         self._apply_start_pose_flag()
-
         self.data.ctrl[:] = 0.0
 
         response.success = True
@@ -152,18 +145,19 @@ class MujocoImuNode(Node):
         self.get_logger().info(response.message)
         return response
 
-
     def timer_cb(self) -> None:
-        # Apply action to all actuators (your model has 4 motors)
+        # Apply action
         self.data.ctrl[:] = self.last_action
 
         # Step MuJoCo
         for _ in range(self.steps_per_ctrl):
             mj.mj_step(self.model, self.data)
 
-        # Update viewer if running
+        # Update viewer
         if self.viewer is not None and self.viewer.is_running():
             self.viewer.sync()
+
+        stamp = self.get_clock().now().to_msg()
 
         # ---------------- Publish IMU ----------------
         qw, qx, qy, qz = self.data.qpos[self.qadr : self.qadr + 4]
@@ -171,7 +165,7 @@ class MujocoImuNode(Node):
         acc = self.data.sensordata[self.acc_adr : self.acc_adr + self.acc_dim]
 
         imu_msg = Imu()
-        imu_msg.header.stamp = self.get_clock().now().to_msg()
+        imu_msg.header.stamp = stamp
         imu_msg.header.frame_id = "base_link"
 
         imu_msg.orientation.w = float(qw)
@@ -195,24 +189,40 @@ class MujocoImuNode(Node):
 
         self.pub_imu.publish(imu_msg)
 
-        # ---------------- Publish Pose ----------------
+        # ---------------- Get base pose + twist from FREE joint ----------------
         x, y, z = self.data.qpos[self.free_qpos_adr : self.free_qpos_adr + 3]
         qw, qx, qy, qz = self.data.qpos[self.free_qpos_adr + 3 : self.free_qpos_adr + 7]
 
-        pose_msg = PoseStamped()
-        pose_msg.header.stamp = imu_msg.header.stamp
-        pose_msg.header.frame_id = "world"
+        vx, vy, vz, wx, wy, wz = self.data.qvel[self.free_qvel_adr : self.free_qvel_adr + 6]
 
-        pose_msg.pose.position.x = float(x)
-        pose_msg.pose.position.y = float(y)
-        pose_msg.pose.position.z = float(z)
+        # ---------------- Publish Odometry ----------------
+        odom = Odometry()
+        odom.header.stamp = stamp
+        odom.header.frame_id = "world"
+        odom.child_frame_id = "base_link"
 
-        pose_msg.pose.orientation.w = float(qw)
-        pose_msg.pose.orientation.x = float(qx)
-        pose_msg.pose.orientation.y = float(qy)
-        pose_msg.pose.orientation.z = float(qz)
+        odom.pose.pose.position.x = float(x)
+        odom.pose.pose.position.y = float(y)
+        odom.pose.pose.position.z = float(z)
 
-        self.pub_pose.publish(pose_msg)
+        odom.pose.pose.orientation.w = float(qw)
+        odom.pose.pose.orientation.x = float(qx)
+        odom.pose.pose.orientation.y = float(qy)
+        odom.pose.pose.orientation.z = float(qz)
+
+        odom.twist.twist.linear.x = float(vx)
+        odom.twist.twist.linear.y = float(vy)
+        odom.twist.twist.linear.z = float(vz)
+
+        odom.twist.twist.angular.x = float(wx)
+        odom.twist.twist.angular.y = float(wy)
+        odom.twist.twist.angular.z = float(wz)
+
+        # Covariances unknown
+        odom.pose.covariance[0] = -1.0
+        odom.twist.covariance[0] = -1.0
+
+        self.pub_odom.publish(odom)
 
 
 def main(args=None):
