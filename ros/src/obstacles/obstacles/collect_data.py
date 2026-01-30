@@ -8,7 +8,8 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32
-from sensor_msgs.msg import Imu, Odometry
+from sensor_msgs.msg import Imu
+from nav_msgs.msg import Odometry
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -23,7 +24,7 @@ class Config:
     # We want a FIXED dataset dt for GP training
     sample_dt: float = 0.01        # [s] dataset sampling + command update rate (10 Hz)
 
-    duration: float = 60.0        # [s] total run time
+    duration: float = 5.0        # [s] total run time
     u_min: float = -1.0
     u_max: float = 1.0
 
@@ -31,7 +32,7 @@ class Config:
     online_plot: bool = False
 
     # save_path: str = "utils/data/mujoco_random_run.npz"
-    save_path: str = "utils/data/mujoco_random_run_svgp.npz"
+    save_path: str = "data/mujoco_random_run_svgp.npz"
     # save_path: str = "utils/mujoco_random_run_dt0p2.npz"
     
 
@@ -360,15 +361,17 @@ def main():
             np.savez(
                 cfg.save_path,
                 # IMPORTANT: training should assume dt = cfg.sample_dt (fixed)
-                dt=np.float32(cfg.sample_dt),
-                t=np.asarray(node.t_log, dtype=np.float32),
-                pitch=np.asarray(node.pitch_log, dtype=np.float32),
-                flip=np.asarray(node.flip_rel_log, dtype=np.float32),
-                u=np.asarray(node.u_log, dtype=np.float32),
-                rate=np.asarray(node.rate_log, dtype=np.float32),
-                acc=np.asarray(node.acc_log, dtype=np.float32),
-                vz=np.asarray(node.vz_log, dtype=np.float32),
-                vx=np.asarray(node.vx_log, dtype=np.float32),
+                dt      =           np.float32(cfg.sample_dt),
+                t       =           np.asarray(node.t_log, dtype=np.float32),
+                pitch   =           np.asarray(node.pitch_log, dtype=np.float32),
+                flip    =           np.asarray(node.flip_rel_log, dtype=np.float32),
+                u       =           np.asarray(node.u_log, dtype=np.float32),
+                rate    =           np.asarray(node.rate_log, dtype=np.float32),
+                acc     =           np.asarray(node.acc_log, dtype=np.float32),
+                vz      =           np.asarray(node.vz_log, dtype=np.float32),
+                vx      =           np.asarray(node.vx_log, dtype=np.float32),
+                x_pos   =           np.asarray(node.x_log, dtype=np.float32),
+                linear_speed_x  =   np.asarray(node.linear_x_log, dtype=np.float32),
             )
             node.get_logger().info(f"Saved data to NPZ: {cfg.save_path} (N={len(node.t_log)})")
             print(f"Done. Samples: {len(node.t_log)}  approx sim time: {node.t_log[-1]:.3f}s")
