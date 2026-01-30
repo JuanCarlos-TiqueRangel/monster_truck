@@ -199,8 +199,11 @@ if __name__ == "__main__":
         dt=0.1,
 
         # YOU define these:
-        input_keys=["flip", "rate", "u"],
-        output_keys=["flip", "rate"],
+        # input_keys=["flip", "rate", "u"],
+        # output_keys=["flip", "rate"],
+        input_keys=["pose", "d_pose", "pitch", "d_pitch", "u"],
+        output_keys=["pose", "d_pose", "pitch", "d_pitch"],
+        
 
         # derivative targets like before:
         target_mode="derivative",
