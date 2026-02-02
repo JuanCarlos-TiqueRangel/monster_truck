@@ -72,6 +72,12 @@ class MujocoImuNode(Node):
         self.acc_adr = self.model.sensor_adr[acc_id]
         self.acc_dim = self.model.sensor_dim[acc_id]
 
+        # ---------------- Obstacle (pole_1) geom id ----------------
+        self.pole_geom_id = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "obs_box_1")
+        if self.pole_geom_id < 0:
+            raise RuntimeError("Geom 'obs_box_1' not found in XML (check name='obs_box_1')")
+
+
         # ---------------- Reset once + apply START_FLIPPED ----------------
         mj.mj_resetData(self.model, self.data)
         self.data.ctrl[:] = 0.0
@@ -86,7 +92,7 @@ class MujocoImuNode(Node):
         try:
             self.viewer = mjviewer.launch_passive(self.model, self.data)
         except Exception as e:
-            self.get_logger().warn(f"Viewer not started (headless?): {e}")
+            self.get_logger().warning(f"Viewer not started (headless?): {e}")
 
         # ---------------- ROS interfaces ----------------
         self.last_action = 0.0
@@ -94,13 +100,14 @@ class MujocoImuNode(Node):
 
         self.pub_imu = self.create_publisher(Imu, "car_imu", 10)
         self.pub_odom = self.create_publisher(Odometry, "car_odom", 10)
+        self.pub_obs_pose = self.create_publisher(PoseStamped, "obstacle_pose", 10)
 
         self.reset_srv = self.create_service(Trigger, "reset_car", self.reset_callback)
         self.timer = self.create_timer(self.ctrl_dt, self.timer_cb)
 
         self.get_logger().info(
             f"MujocoImuNode ready. START_FLIPPED={START_FLIPPED}. "
-            "Subscribing /cmd_action, publishing /car_imu, /car_pose, /car_odom."
+            "Subscribing /cmd_action, publishing /car_imu, /car_odom, /obstacle_pose."
         )
 
     # ------------------------------------------------------------
@@ -145,6 +152,35 @@ class MujocoImuNode(Node):
         self.get_logger().info(response.message)
         return response
 
+
+    def _publish_pole_pose(self, stamp):
+        # World position of the geom
+        p = self.data.geom_xpos[self.pole_geom_id]  # (3,)
+
+        # World rotation matrix of the geom (flattened 9 values)
+        xmat = self.data.geom_xmat[self.pole_geom_id]  # (9,)
+
+        # Convert rotation matrix -> quaternion [w, x, y, z]
+        quat = np.zeros(4, dtype=np.float64)
+        mj.mju_mat2Quat(quat, xmat)
+
+        msg = PoseStamped()
+        msg.header.stamp = stamp
+        msg.header.frame_id = "world"
+
+        msg.pose.position.x = float(p[0])
+        msg.pose.position.y = float(p[1])
+        msg.pose.position.z = float(p[2])
+
+        msg.pose.orientation.w = float(quat[0])
+        msg.pose.orientation.x = float(quat[1])
+        msg.pose.orientation.y = float(quat[2])
+        msg.pose.orientation.z = float(quat[3])
+
+        self.pub_obs_pose.publish(msg)
+
+
+
     def timer_cb(self) -> None:
         # Apply action
         self.data.ctrl[:] = self.last_action
@@ -158,6 +194,9 @@ class MujocoImuNode(Node):
             self.viewer.sync()
 
         stamp = self.get_clock().now().to_msg()
+
+        # ---------------- Publish obstacle pose ----------------
+        self._publish_pole_pose(stamp)
 
         # ---------------- Publish IMU ----------------
         qw, qx, qy, qz = self.data.qpos[self.qadr : self.qadr + 4]

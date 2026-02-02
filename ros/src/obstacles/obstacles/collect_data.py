@@ -22,7 +22,7 @@ import matplotlib.patches as patches
 @dataclass
 class Config:
     # We want a FIXED dataset dt for GP training
-    sample_dt: float = 0.01        # [s] dataset sampling + command update rate (10 Hz)
+    sample_dt: float = 0.1        # [s] dataset sampling + command update rate (10 Hz)
 
     duration: float = 5.0        # [s] total run time
     u_min: float = -1.0
@@ -32,7 +32,7 @@ class Config:
     online_plot: bool = False
 
     # save_path: str = "utils/data/mujoco_random_run.npz"
-    save_path: str = "data/mujoco_random_run_svgp.npz"
+    save_path: str = "data/mujoco_random_wheelie.npz"
     # save_path: str = "utils/mujoco_random_run_dt0p2.npz"
     
 
@@ -370,7 +370,7 @@ def main():
                 acc     =           np.asarray(node.acc_log, dtype=np.float32),
                 vz      =           np.asarray(node.vz_log, dtype=np.float32),
                 vx      =           np.asarray(node.vx_log, dtype=np.float32),
-                x_pos   =           np.asarray(node.x_log, dtype=np.float32),
+                x_pose   =           np.asarray(node.x_log, dtype=np.float32),
                 linear_speed_x  =   np.asarray(node.linear_x_log, dtype=np.float32),
             )
             node.get_logger().info(f"Saved data to NPZ: {cfg.save_path} (N={len(node.t_log)})")
