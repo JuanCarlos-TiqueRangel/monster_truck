@@ -25,7 +25,7 @@ class KeyboardCmdActionNode(Node):
         self.cmd_pub = self.create_publisher(Float32, "cmd_action", 10)
 
         # Tunables
-        self.amplitude = 0.6   # command magnitude
+        self.amplitude = 1.0   # command magnitude
         self.pub_hz = 50.0     # publish rate
 
         self.current_cmd = 0.0

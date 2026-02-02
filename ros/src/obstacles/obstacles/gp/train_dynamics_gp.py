@@ -18,7 +18,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 
 from gp_dynamics import GPManager
-
+from pathlib import Path
 
 # -----------------------------
 # Config
@@ -194,29 +194,35 @@ def save_gps(gps: List[GPManager], y_names: List[str], out_dir: str, prefix: str
 # Example main (edit here)
 # -----------------------------
 if __name__ == "__main__":
+    script_dir = Path(__file__).resolve().parent        # obstacles/gp
+    obstacles_dir = script_dir.parent                   # obstacles
+    npz = obstacles_dir / "data" / "mujoco_random_wheelie.npz"
+
+    # input_=["x_pose", "linear_speed_x", "pitch", "rate", "u"],
+    # output_=["x_pose", "linear_speed_x", "pitch", "rate"],
+
+    input_=["pitch", "rate", "u"]
+    output_=["pitch", "rate"]
+
+    # modes: derivative, delta, next
+    mode = "derivative"
+
     cfg = TrainConfig(
-        npz_path="data/train_example_100ep.npz",
+        npz_path=str(npz),
         dt=0.1,
-
-        # YOU define these:
-        # input_keys=["flip", "rate", "u"],
-        # output_keys=["flip", "rate"],
-        input_keys=["pose", "d_pose", "pitch", "d_pitch", "u"],
-        output_keys=["pose", "d_pose", "pitch", "d_pitch"],
-        
-
-        # derivative targets like before:
-        target_mode="derivative",
-
-        # None = use all (exact GP may be heavy if N is large)
+        input_keys=input_,
+        output_keys=output_,
+        target_mode=mode,
         N_target=1000,
-
         kernel="RQ",
         iters=300,
-
         out_dir="models",
         prefix="gp_dynamics",
     )
 
+    print(f"[PATH] cwd={Path.cwd()}")
+    print(f"[PATH] npz_path={cfg.npz_path} exists={Path(cfg.npz_path).exists()}")
+
     gps, X_used, Y_used, y_names = train_gps_from_npz(cfg)
     save_gps(gps, y_names, cfg.out_dir, cfg.prefix)
+
