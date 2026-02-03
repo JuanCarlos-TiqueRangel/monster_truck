@@ -31,6 +31,8 @@ GP_DIR   = BASE_DIR / "gp"
 #from gp_dynamics import GPManager  # <-- your GPManager with .load()
 from gp.gp_dynamics import GPManager
 
+from utils import geometry
+
 # from re_train_dynamics_gp import train_dynamics_gp_from_arrays
 from gp.re_train_dynamics_gp import train_dynamics_gp_from_arrays
 
@@ -56,15 +58,16 @@ class MPPIConfig:
 
     # Target / stop conditions
     pitch_target: float = 1.2 #math.pi/2.0
-    flip_stop_abs: float = 3.1
+    flip_stop_abs: float = 3.0
 
     # Paths to trained GP models
     # gp_flip_path: str = "gp/models/gp_dynamics_pitch_d_dt.pt"
     # gp_rate_path: str = "gp/models/gp_dynamics_rate_d_dt.pt"
 
-    gp_flip_path: str = str(GP_DIR / "models" / "gp_dynamics_pitch_d_dt.pt")
+    gp_flip_path: str = str(GP_DIR / "models" / "gp_dynamics_flip_d_dt.pt")
     gp_rate_path: str = str(GP_DIR / "models" / "gp_dynamics_rate_d_dt.pt")
-
+    gp_pos_x_path: str = str(GP_DIR / "models" / "gp_dynamics_x_pose_d_dt.pt")
+    gp_vx_path: str = str(GP_DIR / "models" / "gp_dynamics_linear_speed_x_d_dt.pt")
 
     # ---- logging ----
     log_dir: str = str(BASE_DIR / "logs")
@@ -88,14 +91,14 @@ class MPPIConfig:
     
     episode_timeout_sec: float = 20.0   # hard timeout for an episode (s)
     
-    entropy_beta: float = 0.1      # set e.g. 0.05–0.5 to encourage exploration
+    entropy_beta: float = 0.0      # set e.g. 0.05–0.5 to encourage exploration
     entropy_use_log: bool = True   # log-variance entropy (stable)
     entropy_var_floor: float = 1e-6
     entropy_var_cap: float = 1e2
     entropy_dt_scale: bool = True  # scale var by dt^2 (recommended)
     
     # ---- seed dataset (initial offline run) ----
-    seed_npz_path: str = str(DATA_DIR / "mujoco_random_wheelie.npz")
+    seed_npz_path: str = str(DATA_DIR / "mujoco_manual_wheelie.npz")
 
     seed_episode_id: int = -1                           # fixed “seed episode”
     keep_seed: bool = True                              # always include seed points
@@ -119,6 +122,16 @@ class MPPIConfig:
     wheelie_pitch_tol: float = 0.15
     wheelie_rate_tol: float = 1.0
 
+    goal_x: float = 5.0      # example: set this to “past the obstacle”
+    w_goal: float = 3.0
+    w_vx: float = 0.5
+    v_des: float = 1.0       # desired forward speed
+
+    wheelie_hold_sigma_scale: float = 0.25   # reduce sigma during hold
+    wheelie_hold_extra_wheelie: float = 2.0  # increase wheelie weight during hold
+
+
+
 # ============================================================
 # MPPI Controller Node
 # ============================================================
@@ -135,8 +148,12 @@ class MPPICarControllerNode(Node):
         # ----- Load GP models -----
         self.gp_flip: GPManager = GPManager.load(self.cfg.gp_flip_path)
         self.gp_rate: GPManager = GPManager.load(self.cfg.gp_rate_path)
+        self.gp_pose_x: GPManager = GPManager.load(self.cfg.gp_pos_x_path)
+        self.gp_vx: GPManager = GPManager.load(self.cfg.gp_vx_path)
         self.gp_flip.device = self.device
         self.gp_rate.device = self.device
+        self.gp_pose_x.device = self.device
+        self.gp_vx.device = self.device
 
         self.pitch_target_t = torch.tensor(
             self.cfg.pitch_target, dtype=torch.float32, device=self.device
@@ -144,6 +161,8 @@ class MPPICarControllerNode(Node):
 
         self.obs_pos_x: Optional[float] = None
         self.car_pos_x: Optional[float] = None
+        self.car_vx: float = 0.0
+        self.last_odom_valid: bool = False
         self.wheelie_hold_steps = 0
 
         # ----- ROS interfaces -----
@@ -190,6 +209,9 @@ class MPPICarControllerNode(Node):
         self.log_rate = deque(maxlen=self.cfg.max_log_points)
         self.log_u    = deque(maxlen=self.cfg.max_log_points)
         self.log_ep   = deque(maxlen=self.cfg.max_log_points)
+        self.log_x  = deque(maxlen=self.cfg.max_log_points)
+        self.log_vx = deque(maxlen=self.cfg.max_log_points)
+
 
         # ==========================
         # Retraining state
@@ -215,7 +237,7 @@ class MPPICarControllerNode(Node):
         if not os.path.exists(self.metrics_path):
             with open(self.metrics_path, "w", newline="") as f:
                 w = csv.writer(f)
-                w.writerow(["episode", "flip_time_sec", "retrain_started"])
+                w.writerow(["episode", "time_to_goal_sec", "retrain_started"])
 
         # ==========================
         # Live learning curve plot
@@ -245,10 +267,10 @@ class MPPICarControllerNode(Node):
             self.fig, self.ax = plt.subplots()
             (self.line,) = self.ax.plot([], [], marker="o")
             self.ax.set_xlabel("Episode")
-            self.ax.set_ylabel("Time to flip [s]")
+            self.ax.set_ylabel("Time_to_goal_sec")
             self.ax.grid(True)
             try:
-                self.fig.canvas.manager.set_window_title("Learning Curve: Episode vs Time-to-Flip")
+                self.fig.canvas.manager.set_window_title("Learning Curve: Episode vs Time_to_goal_sec")
             except Exception:
                 pass
 
@@ -278,49 +300,13 @@ class MPPICarControllerNode(Node):
             self.fig.savefig(out, dpi=150)
 
 
-    # ========================================================
-    # Helpers: quaternion -> R + pitch, angle unwrap
-    # ========================================================
-    @staticmethod
-    def quat_to_R_and_pitch(qw, qx, qy, qz):
-        R00 = 1 - 2 * (qy * qy + qz * qz)
-        R01 = 2 * (qx * qy - qw * qz)
-        R02 = 2 * (qx * qz + qw * qy)
-
-        R10 = 2 * (qx * qy + qw * qz)
-        R11 = 1 - 2 * (qx * qx + qz * qz)
-        R12 = 2 * (qy * qz - qw * qx)
-
-        R20 = 2 * (qx * qz - qw * qy)
-        R21 = 2 * (qy * qz + qw * qx)
-        R22 = 1 - 2 * (qx * qx + qy * qy)
-
-        pitch = -math.asin(max(-1.0, min(1.0, R20)))
-        R = np.array([[R00, R01, R02],
-                      [R10, R11, R12],
-                      [R20, R21, R22]], dtype=float)
-        return R, pitch
-
-    @staticmethod
-    def unwrap_angle(prev_angle, prev_unwrapped, angle):
-        if prev_angle is None:
-            return angle, angle
-        d = angle - prev_angle
-        if d > math.pi:
-            angle_unwrapped = prev_unwrapped + (d - 2 * math.pi)
-        elif d < -math.pi:
-            angle_unwrapped = prev_unwrapped + (d + 2 * math.pi)
-        else:
-            angle_unwrapped = prev_unwrapped + d
-        return angle, angle_unwrapped
-
     def imu_cb(self, msg: Imu):
         qw = float(msg.orientation.w)
         qx = float(msg.orientation.x)
         qy = float(msg.orientation.y)
         qz = float(msg.orientation.z)
 
-        R, _ = self.quat_to_R_and_pitch(qw, qx, qy, qz)
+        R, _ = geometry.quat_to_R_and_pitch(qw, qx, qy, qz)
         up_z = R[2, 2]
         theta = math.atan2(R[0, 2], R[2, 2])
         pitch_rate = float(msg.angular_velocity.y)
@@ -351,10 +337,19 @@ class MPPICarControllerNode(Node):
             self.watchdog_fired = False
             return
 
+
+        # --- guard for first-ever IMU / startup race ---
+        if self.prev_theta is None:
+            self.prev_theta = theta
+            self.prev_theta_unwrapped = theta
+            if self.theta0 is None:
+                self.theta0 = theta
+
+
         # ---------------------------
         # Normal episode logic
         # ---------------------------
-        self.prev_theta, theta_unwrapped = self.unwrap_angle(
+        self.prev_theta, theta_unwrapped = geometry.unwrap_angle(
             self.prev_theta, self.prev_theta_unwrapped, theta
         )
         self.prev_theta_unwrapped = theta_unwrapped
@@ -375,158 +370,162 @@ class MPPICarControllerNode(Node):
 
     def car_callback(self, msg: Odometry):
         self.car_pos_x = float(msg.pose.pose.position.x)
-
-    # ========================================================
-    # Torch helpers: angdiff, stage cost, GP step
-    # ========================================================
-    @staticmethod
-    def angdiff_torch(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-        return torch.remainder(a - b + torch.pi, 2 * torch.pi) - torch.pi
-
-    # def stage_cost_torch(self, states: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
-    #     pitch = states[:, 0]
-
-    #     rate = states[:, 1]
-
-    #     u = actions
-    #     err = self.angdiff_torch(pitch, self.pitch_target_t)
-    #     cost_pitch = 1.0 * err ** 2
-    #     cost_u = 0.01 * u ** 2
-    #     cost_rate = 2 * rate**2
-    #     return cost_u + cost_pitch + cost_rate
+        self.car_vx = float(msg.twist.twist.linear.x)
+        self.last_odom_valid = True
 
 
 
-    def stage_cost_torch(
-        self,
-        states: torch.Tensor,
-        actions: torch.Tensor,
-        d_obs: torch.Tensor,   # (K,)
-    ) -> torch.Tensor:
-        pitch = states[:, 0]
-        rate  = states[:, 1]
+    def stage_cost_torch(self, states: torch.Tensor, actions: torch.Tensor, obs_x: torch.Tensor) -> torch.Tensor:
+        # states: (K,4) = [x, vx, pitch, rate]
+        x     = states[:, 0]
+        vx    = states[:, 1]
+        pitch = states[:, 2]
+        rate  = states[:, 3]
         u     = actions
 
-        # gate: 0 far -> stay flat, 1 close -> wheelie
+        # distance to obstacle in front (if behind -> treat as far)
+        d_obs = obs_x - x
+        d_obs = torch.where(d_obs > 0.0, d_obs, torch.full_like(d_obs, 1e6))
+
+        # wheelie gate near obstacle
         d_trig  = float(self.cfg.obs_trigger_dist)
         d_sigma = float(self.cfg.obs_trigger_smooth)
-        g = torch.sigmoid((d_trig - d_obs) / (d_sigma + 1e-6))  # (K,)
+        g = torch.sigmoid((d_trig - d_obs) / (d_sigma + 1e-6))
 
-        # errors
-        err_wheelie = self.angdiff_torch(pitch, self.pitch_target_t)  # target wheelie pitch
-        err_flat    = pitch                                          # target = 0 rad
+        # pitch tracking (flat far, wheelie near)
+        err_wheelie = geometry.angdiff_torch(pitch, self.pitch_target_t)
+        err_flat    = pitch
 
         cost_pitch = (1.0 - g) * self.cfg.w_flat    * (err_flat ** 2) \
-                   + (g)       * self.cfg.w_wheelie * (err_wheelie ** 2)
+                + (g)       * self.cfg.w_wheelie * (err_wheelie ** 2)
 
+        # goal + speed
+        goal_x = float(self.cfg.goal_x)
+        goal_scale = (1.0 - 0.7 * g)  # still cares about goal near obstacle
+        cost_goal  = goal_scale * self.cfg.w_goal * (x - goal_x)**2
+        cost_vx    = goal_scale * self.cfg.w_vx   * (vx - float(self.cfg.v_des))**2
+
+
+        # regularization
         cost_u    = self.cfg.w_u * (u ** 2)
         cost_rate = self.cfg.w_rate * (rate ** 2)
 
-        # safety: don't let pitch exceed a limit (avoid flipping)
+        # pitch limit safety
         pitch_lim = float(self.cfg.pitch_limit)
         cost_lim  = self.cfg.w_pitch_limit * torch.relu(torch.abs(pitch) - pitch_lim) ** 2
 
-        return cost_pitch + cost_u + cost_rate + cost_lim
-
+        return cost_pitch + cost_goal + cost_vx + cost_u + cost_rate + cost_lim
 
 
 
 
     def gp_step_batch_torch(self, states: torch.Tensor, actions: torch.Tensor):
-        X = torch.stack([states[:, 0], states[:, 1], actions], dim=-1)
+        # states: (K,4) = [x, vx, pitch, rate]
+        x    = states[:, 0]
+        vx   = states[:, 1]
+        pitch= states[:, 2]
+        rate = states[:, 3]
 
-        # lock so reload can't happen mid-predict
+        # X: (K,5) = [x, vx, pitch, rate, u]
+        X = torch.stack([x, vx, pitch, rate, actions], dim=-1)
+
         with self.model_lock:
-            # If entropy is OFF, avoid variance work entirely
             if self.cfg.entropy_beta <= 0.0:
-                d_flip_mean, _ = self.gp_flip.predict_torch(X)
-                d_rate_mean, _ = self.gp_rate.predict_torch(X)
-                d_flip_var = None
-                d_rate_var = None
+                dx_mean, _    = self.gp_pose_x.predict_torch(X)
+                dvx_mean, _   = self.gp_vx.predict_torch(X)
+                dp_mean, _    = self.gp_flip.predict_torch(X)
+                dr_mean, _    = self.gp_rate.predict_torch(X)
+                dx_var = dvx_var = dp_var = dr_var = None
             else:
-                d_flip_mean, d_flip_var = self.gp_flip.predict_torch(X)  # var (NOT std)
-                d_rate_mean, d_rate_var = self.gp_rate.predict_torch(X)  # var (NOT std)
+                dx_mean,  dx_var  = self.gp_pose_x.predict_torch(X)
+                dvx_mean, dvx_var = self.gp_vx.predict_torch(X)
+                dp_mean,  dp_var  = self.gp_flip.predict_torch(X)
+                dr_mean,  dr_var  = self.gp_rate.predict_torch(X)
 
         dt = float(self.cfg.ctrl_dt)
 
-        # propagate mean dynamics
         next_states = torch.empty_like(states)
-        next_states[:, 0] = states[:, 0] + d_flip_mean * dt
-        next_states[:, 1] = states[:, 1] + d_rate_mean * dt
-        next_states[:, 0].clamp_(-math.pi, math.pi)
-        next_states[:, 1].clamp_(-20.0, 20.0)
+        next_states[:, 0] = x     + dx_mean  * dt
+        next_states[:, 1] = vx    + dvx_mean * dt
+        next_states[:, 2] = pitch + dp_mean  * dt
+        next_states[:, 3] = rate  + dr_mean  * dt
 
-        # If entropy OFF -> return immediately (no extra compute)
+        # reasonable clamps (tune)
+        next_states[:, 2].clamp_(-math.pi, math.pi)
+        next_states[:, 3].clamp_(-20.0, 20.0)
+
         if self.cfg.entropy_beta <= 0.0:
             return next_states, None
 
-        # --------------------------
-        # Entropy compute (only if ON)
-        # --------------------------
-        d_flip_var = torch.clamp(d_flip_var, min=self.cfg.entropy_var_floor, max=self.cfg.entropy_var_cap)
-        d_rate_var = torch.clamp(d_rate_var, min=self.cfg.entropy_var_floor, max=self.cfg.entropy_var_cap)
+        # entropy (optional)
+        dx_var  = torch.clamp(dx_var,  min=self.cfg.entropy_var_floor, max=self.cfg.entropy_var_cap)
+        dvx_var = torch.clamp(dvx_var, min=self.cfg.entropy_var_floor, max=self.cfg.entropy_var_cap)
+        dp_var  = torch.clamp(dp_var,  min=self.cfg.entropy_var_floor, max=self.cfg.entropy_var_cap)
+        dr_var  = torch.clamp(dr_var,  min=self.cfg.entropy_var_floor, max=self.cfg.entropy_var_cap)
 
-        # variance of next state after integration: Var[x + dt*Δ] = dt^2 Var[Δ]
         if self.cfg.entropy_dt_scale:
-            var_next = torch.stack([d_flip_var, d_rate_var], dim=-1) * (dt * dt)
+            var_next = torch.stack([dx_var, dvx_var, dp_var, dr_var], dim=-1) * (dt * dt)
         else:
-            var_next = torch.stack([d_flip_var, d_rate_var], dim=-1)
+            var_next = torch.stack([dx_var, dvx_var, dp_var, dr_var], dim=-1)
 
-        # entropy proxy (drop constants): 0.5 * sum log(var)
         if self.cfg.entropy_use_log:
-            entropy = 0.5 * torch.log(var_next).sum(dim=-1)    # shape (K,)
+            entropy = 0.5 * torch.log(var_next).sum(dim=-1)
         else:
-            entropy = var_next.sum(dim=-1)                     # shape (K,)
+            entropy = var_next.sum(dim=-1)
 
         entropy = torch.nan_to_num(entropy, nan=0.0, posinf=0.0, neginf=0.0)
         return next_states, entropy
-
-
 
 
     # ========================================================
     # MPPI core
     # ========================================================
     @torch.no_grad()
-    def mppi_action(self, x0_np, d_obs_scalar: float):
+    def mppi_action(self, x0_np):
         cfg = self.cfg
-        H = cfg.horizon
-        K = cfg.num_rollouts
+        H, K = cfg.horizon, cfg.num_rollouts
 
         x0 = torch.as_tensor(x0_np, dtype=torch.float32, device=self.device)
-        assert x0.shape == (2,)
+        assert x0.shape == (4,)
 
         u_init = torch.zeros(H, dtype=torch.float32, device=self.device) if self.plan is None else self.plan
-
         eps = torch.randn(K, H, device=self.device) * cfg.sigma
         U = torch.clamp(u_init.unsqueeze(0) + eps, cfg.u_min, cfg.u_max)
 
         states = x0.unsqueeze(0).repeat(K, 1)
         costs = torch.zeros(K, dtype=torch.float32, device=self.device)
 
-        beta = float(self.cfg.entropy_beta)
+        beta = float(cfg.entropy_beta)
 
-        d_obs0 = torch.full((K,), float(d_obs_scalar), dtype=torch.float32, device=self.device)
+        # obs_x for rollout gating
+        if self.obs_pos_x is None:
+            obs_x0 = torch.full((K,), 1e6, dtype=torch.float32, device=self.device)
+        else:
+            obs_x0 = torch.full((K,), float(self.obs_pos_x), dtype=torch.float32, device=self.device)
 
         for t in range(H):
             u_t = U[:, t]
-            stage = self.stage_cost_torch(states, u_t, d_obs0)
+            stage = self.stage_cost_torch(states, u_t, obs_x0)
             states, ent = self.gp_step_batch_torch(states, u_t)
+            if not torch.isfinite(states).all():
+                self.get_logger().error("Rollout produced non-finite states (GP output likely NaN/Inf).")
+                break
 
             if ent is not None:
                 stage = stage - beta * ent
-
             costs = costs + stage
 
         J_min = costs.min()
-        weights = torch.exp(-(costs - J_min) / cfg.lambda_)
-        weights_sum = weights.sum() + 1e-8
+        w = torch.exp(-(costs - J_min) / cfg.lambda_)
+        wsum = w.sum() + 1e-8
 
-        du = (weights.unsqueeze(1) * eps).sum(dim=0) / weights_sum
+        du = (w.unsqueeze(1) * eps).sum(dim=0) / wsum
         u_new = torch.clamp(u_init + du, cfg.u_min, cfg.u_max)
 
-        self.plan = u_new.detach()
+        self.plan = torch.cat([u_new[1:], u_new[-1:]], dim=0).detach()
+        
         return float(u_new[0].detach().cpu())
+
 
 
     def control_timer_cb(self):
@@ -567,6 +566,10 @@ class MPPICarControllerNode(Node):
 
         flip_rel = float(self.last_flip_rel)  # pitch (your "flip_rel")
         rate = float(self.last_rate)
+
+        if not self.last_odom_valid:
+            self.publish_u(0.0)
+            return
 
         # -------------------------------------------------
         # Obstacle distance (1D along +x). If unknown or behind -> FAR.
@@ -626,12 +629,11 @@ class MPPICarControllerNode(Node):
                 return
 
         # -------------------------------------------------
-        # Wheelie SUCCESS condition (only when obstacle is close)
-        # Hold near target pitch for some time with low rate.
+        # Wheelie hold logic (stabilize wheelie near obstacle)
         # -------------------------------------------------
-        wheelie_hold_time_sec = float(getattr(cfg, "wheelie_hold_time_sec", 0.5))
-        wheelie_pitch_tol = float(getattr(cfg, "wheelie_pitch_tol", 0.15))
-        wheelie_rate_tol = float(getattr(cfg, "wheelie_rate_tol", 1.0))
+        wheelie_hold_time_sec = float(cfg.wheelie_hold_time_sec)
+        wheelie_pitch_tol     = float(cfg.wheelie_pitch_tol)
+        wheelie_rate_tol      = float(cfg.wheelie_rate_tol)
 
         hold_steps_needed = max(1, int(round(wheelie_hold_time_sec / float(cfg.ctrl_dt))))
         close = (d_obs < float(cfg.obs_trigger_dist))
@@ -639,55 +641,79 @@ class MPPICarControllerNode(Node):
         # angle-wrapped pitch error to target
         err = (flip_rel - float(cfg.pitch_target) + math.pi) % (2.0 * math.pi) - math.pi
 
+        # Update hold counter FIRST
         if close and (abs(err) < wheelie_pitch_tol) and (abs(rate) < wheelie_rate_tol):
             self.wheelie_hold_steps += 1
         else:
             self.wheelie_hold_steps = 0
 
-        if self.wheelie_hold_steps >= hold_steps_needed:
-            # SUCCESS: stop + (optional) retrain schedule + reset
+        holding = close and (self.wheelie_hold_steps >= hold_steps_needed)
+
+        if holding and self.wheelie_hold_steps == hold_steps_needed:
+            self.plan = None
+
+        # Need x to proceed
+        if self.car_pos_x is None:
+            self.publish_u(0.0)
+            return
+
+        # Goal check (success)
+        if self.car_pos_x >= float(cfg.goal_x):
             self.publish_u(0.0)
 
-            ep_num = self.episode_id + 1  # 1-based
+            ep_num = self.episode_id + 1
             do_retrain_now = (cfg.retrain_every_episodes > 0) and (ep_num % cfg.retrain_every_episodes == 0)
 
-            started = False
-            if do_retrain_now:
-                started = self._start_retrain_async(force=True)
-            else:
-                self.get_logger().info(
-                    f"Wheelie success! Skipping retrain (ep_num={ep_num}). "
-                    f"retrain_every_episodes={cfg.retrain_every_episodes}"
-                )
-
+            started = self._start_retrain_async(force=False) if do_retrain_now else False
             self._record_episode_metric(retrain_started=started)
 
-            self.wheelie_hold_steps = 0
             if started:
                 self.reset_after_retrain = True
                 return
             else:
-                self.reset_after_retrain = False
                 self.request_reset()
                 return
 
+
         # -------------------------------------------------
-        # MPPI (normal control)
+        # MPPI (normal control) with temporary "hold" shaping
         # -------------------------------------------------
-        x0 = np.array([flip_rel, rate], dtype=np.float32)
+        x0 = np.array([self.car_pos_x, self.car_vx, flip_rel, rate], dtype=np.float32)
+
+        # Save originals (always restore)
+        old_sigma     = cfg.sigma
+        old_w_wheelie = cfg.w_wheelie
+        old_w_flat    = cfg.w_flat
+
         try:
-            u_cmd = self.mppi_action(x0, d_obs)
-        except Exception as e:
-            self.get_logger().error(f"MPPI error: {e}")
-            u_cmd = 0.0
+            if holding:
+                cfg.sigma     = old_sigma * float(cfg.wheelie_hold_sigma_scale)
+                cfg.w_wheelie = old_w_wheelie * float(cfg.wheelie_hold_extra_wheelie)
+                cfg.w_flat    = old_w_flat * 0.5  # IMPORTANT: do NOT *= (no accumulation)
+
+            try:
+                u_cmd = self.mppi_action(x0)
+                if not math.isfinite(u_cmd):
+                    self.get_logger().error("u_cmd is NaN/Inf coming out of MPPI. Forcing 0.")
+                    u_cmd = 0.0
+
+            except Exception as e:
+                self.get_logger().error(f"MPPI error: {e}")
+                self.get_logger().error(traceback.format_exc())
+                u_cmd = 0.0
+
+        finally:
+            # ALWAYS restore, even if returns/errors happen
+            cfg.sigma     = old_sigma
+            cfg.w_wheelie = old_w_wheelie
+            cfg.w_flat    = old_w_flat
 
         u_cmd = float(np.clip(u_cmd, cfg.u_min, cfg.u_max))
 
-        # episode starts exactly when first MPPI action is sent
         self._mark_episode_started()
-
         self.publish_u(u_cmd)
         self._log_step(flip_rel, rate, u_cmd)
+
 
 
     def publish_u(self, u: float):
@@ -701,23 +727,40 @@ class MPPICarControllerNode(Node):
     # Logging + retraining
     # ==========================
     def _log_step(self, flip_rel: float, rate: float, u: float):
+        if self.car_pos_x is None:
+            return
         with self.log_lock:
             self.log_flip.append(float(flip_rel))
             self.log_rate.append(float(rate))
+            self.log_x.append(float(self.car_pos_x))
+            self.log_vx.append(float(self.car_vx))
             self.log_u.append(float(u))
             self.log_ep.append(int(self.episode_id))
+
 
     def _snapshot_dataset(self):
         with self.log_lock:
             flip = np.asarray(list(self.log_flip), dtype=np.float32)
             rate = np.asarray(list(self.log_rate), dtype=np.float32)
+            x  = np.asarray(list(self.log_x), dtype=np.float32)
+            vx = np.asarray(list(self.log_vx), dtype=np.float32)
             u    = np.asarray(list(self.log_u),    dtype=np.float32)
             ep   = np.asarray(list(self.log_ep),   dtype=np.int64)
-        return flip, rate, u, ep
+        return flip, rate, x, vx, u, ep
 
-    def _save_dataset_npz(self, flip, rate, u, ep):
+    def _save_dataset_npz(self, flip, rate, x, vx, u, ep):
         out = os.path.join(self.cfg.log_dir, f"dataset_ep{self.episode_id:04d}.npz")
-        np.savez_compressed(out, flip=flip, rate=rate, u=u, episode_id=ep, dt=np.array(self.cfg.ctrl_dt, dtype=np.float32))
+        np.savez_compressed(
+            out, 
+            flip=flip, 
+            rate=rate, 
+            x_pose=x, 
+            linear_speed_x=vx, 
+            u=u, 
+            episode_id=ep, 
+            dt=np.array(self.cfg.ctrl_dt, dtype=np.float32)
+            )
+        
         self.get_logger().info(f"Saved dataset snapshot: {out}")
 
     def _start_retrain_async(self, force: bool = False) -> bool:
@@ -738,23 +781,26 @@ class MPPICarControllerNode(Node):
                 self.get_logger().info("Not enough new data since last train; skipping.")
                 return False
 
-        flip, rate, u, ep = self._snapshot_dataset()
-        self._save_dataset_npz(flip, rate, u, ep)
+        flip, rate, x, vx, u, ep = self._snapshot_dataset()
+        self._save_dataset_npz(flip, rate, x, vx, u, ep)
 
         # cap training window
         M = self.cfg.max_points_for_train
         if len(flip) > M:
             flip = flip[-M:]
             rate = rate[-M:]
+            x    = x[-M:]
+            vx   = vx[-M:]
             u    = u[-M:]
             ep   = ep[-M:]
+
 
         self.training = True
         n_at_start = n
 
         self.train_thread = threading.Thread(
             target=self._train_worker,
-            args=(flip, rate, u, ep, n_at_start),
+            args=(flip, rate, x, vx, u, ep, n_at_start),
             daemon=True,
         )
         self.train_thread.start()
@@ -763,25 +809,37 @@ class MPPICarControllerNode(Node):
 
 
 
-    def _train_worker(self, flip, rate, u, ep, n_at_start: int):
+    def _train_worker(self, flip, rate, x, vx, u, ep, n_at_start: int):
         t0 = time.perf_counter()
-        try:
-            gps, _, _ = train_dynamics_gp_from_arrays(
-                flip_arr=flip,
-                rate_arr=rate,
-                u_arr=u,
+
+        signals = {
+            "x_pose": x,
+            "linear_speed_x": vx,
+            "flip": flip,
+            "rate": rate,
+            "u": u,
+        }
+
+        input_  = ["x_pose", "linear_speed_x", "flip", "rate", "u"]
+        output_ = ["x_pose", "linear_speed_x", "flip", "rate"]
+
+        try: 
+            gps, X, Y, y_names = train_dynamics_gp_from_arrays(
+                signals_new=signals,
                 dt=self.cfg.ctrl_dt,
+                input_keys=input_,
+                output_keys=output_,
                 episode_id=ep,
-                N_target=self.cfg.N_target_train,   # (ignored by your new trainer, OK)
+                target_mode="derivative",
                 kernel=self.cfg.train_kernel,
                 iters=self.cfg.train_iters,
                 seed_npz_path=self.cfg.seed_npz_path,
-                seed_episode_id=self.cfg.seed_episode_id,
                 keep_seed=self.cfg.keep_seed,
             )
 
-            paths = [self.cfg.gp_flip_path, self.cfg.gp_rate_path]
-            assert len(gps) == len(paths), f"Expected {len(paths)} GPs, got {len(gps)}"
+
+            paths = [self.cfg.gp_pos_x_path, self.cfg.gp_vx_path, self.cfg.gp_flip_path, self.cfg.gp_rate_path]
+            assert len(gps) == len(paths)
 
             # Save both models atomically
             for gp, out_path in zip(gps, paths):
@@ -827,17 +885,21 @@ class MPPICarControllerNode(Node):
             return
 
         with self.model_lock:
-            self.gp_flip = GPManager.load(self.cfg.gp_flip_path)
-            self.gp_rate = GPManager.load(self.cfg.gp_rate_path)
+            self.gp_flip: GPManager = GPManager.load(self.cfg.gp_flip_path)
+            self.gp_rate: GPManager = GPManager.load(self.cfg.gp_rate_path)
+            self.gp_pose_x: GPManager = GPManager.load(self.cfg.gp_pos_x_path)
+            self.gp_vx: GPManager = GPManager.load(self.cfg.gp_vx_path)
             self.gp_flip.device = self.device
             self.gp_rate.device = self.device
+            self.gp_pose_x.device = self.device
+            self.gp_vx.device = self.device
 
         self.plan = None  # clear warm-start after model swap
         self.reload_pending = False
         self.get_logger().info("Reloaded GP models (hot swap).")
 
         try:
-            for d, p in enumerate([self.cfg.gp_flip_path, self.cfg.gp_rate_path]):
+            for d, p in enumerate([self.cfg.gp_pos_x_path, self.cfg.gp_vx_path, self.cfg.gp_flip_path, self.cfg.gp_rate_path]):
                 self.get_logger().info(
                     f"Reloaded file[{d}]: {p} | mtime={os.path.getmtime(p):.0f} | size={os.path.getsize(p)} bytes"
                 )
@@ -862,8 +924,9 @@ class MPPICarControllerNode(Node):
         ep = int(self.episode_id)
 
         self.get_logger().info(
-            f"Episode {ep} flip time: {dt:.3f} s | retrain_started={int(retrain_started)}"
-        )
+            f"Episode {ep} time_to_goal: {dt:.3f} s | retrain_started={int(retrain_started)}"
+                               )
+
 
         with open(self.metrics_path, "a", newline="") as f:
             w = csv.writer(f)

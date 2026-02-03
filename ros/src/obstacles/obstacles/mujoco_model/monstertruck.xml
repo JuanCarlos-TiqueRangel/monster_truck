@@ -33,18 +33,18 @@
     size="0.30 0.30 0.05" 
     rgba="0.2 0.2 0.8 1"/>
 
-    <!-- <geom name="pole_1" type="cylinder" 
-      pos="1.0 1.0 0.0" 
+    <geom name="pole_1" type="cylinder" 
+      pos="6.0 0.0 0.0" 
       size="0.10 1.50" 
       euler="1.5708 0 0" 
-      rgba="0.2 0.7 0.2 1"/> -->
+      rgba="0.2 0.7 0.2 1"/>
 
     <!-- =========================================================
          FLIPPED START
          We resized the roof, so the max roof local z is ~0.14 + 0.01 = 0.15.
          For flipped start (roof on ground), set chassis_z ~= 0.15 (+epsilon).
          ========================================================= -->
-    <body name="chassis" pos="0 0 0.155" quat="0 1 0 0">
+    <body name="chassis" pos="0 0 0.15" quat="0 1 0 0">
       <freejoint/>
 
       <site name="imu_site" pos="0 0 0" size="0.01" rgba="0 1 0 1"/>
