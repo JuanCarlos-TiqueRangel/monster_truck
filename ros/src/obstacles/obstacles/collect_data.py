@@ -24,12 +24,12 @@ class Config:
     # We want a FIXED dataset dt for GP training
     sample_dt: float = 0.1        # [s] dataset sampling + command update rate (10 Hz)
 
-    duration: float = 5.0        # [s] total run time
+    duration: float = 4.0        # [s] total run time
     u_min: float = -1.0
     u_max: float = 1.0
 
     refresh_hz: float = 5.0       # plot refresh
-    online_plot: bool = False
+    online_plot: bool = True
 
     # save_path: str = "utils/data/mujoco_random_run.npz"
     save_path: str = "data/mujoco_random_wheelie.npz"
@@ -131,6 +131,32 @@ class MujocoRandomCmdLogger(Node):
                       [R10, R11, R12],
                       [R20, R21, R22]], dtype=float)
         return R, pitch
+    
+    @staticmethod
+    def quat_to_euler_xyz(w, x, y, z):
+        """
+        Convert quaternion (w, x, y, z) to Euler angles (roll, pitch, yaw)
+        using the roll-pitch-yaw convention (XYZ intrinsic).
+        
+        Returns: (roll, pitch, yaw) in radians
+        """
+        # Roll (x-axis rotation)
+        sinr_cosp = 2.0 * (w * x + y * z)
+        cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
+        roll = math.atan2(sinr_cosp, cosr_cosp)
+
+        # Pitch (y-axis rotation)
+        sinp = 2.0 * (w * y - z * x)
+        # Clamp to handle numerical drift outside [-1, 1]
+        sinp = max(-1.0, min(1.0, sinp))
+        pitch = math.asin(sinp)
+
+        # Yaw (z-axis rotation)
+        siny_cosp = 2.0 * (w * z + x * y)
+        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+        yaw = math.atan2(siny_cosp, cosy_cosp)
+
+        return roll, pitch, yaw
 
     @staticmethod
     def unwrap_angle(prev_angle, prev_unwrapped, angle):

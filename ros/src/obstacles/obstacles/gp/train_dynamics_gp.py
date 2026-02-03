@@ -196,13 +196,13 @@ def save_gps(gps: List[GPManager], y_names: List[str], out_dir: str, prefix: str
 if __name__ == "__main__":
     script_dir = Path(__file__).resolve().parent        # obstacles/gp
     obstacles_dir = script_dir.parent                   # obstacles
-    npz = obstacles_dir / "data" / "mujoco_random_wheelie.npz"
+    npz = obstacles_dir / "data" / "mujoco_manual_wheelie.npz"
 
-    # input_=["x_pose", "linear_speed_x", "pitch", "rate", "u"],
-    # output_=["x_pose", "linear_speed_x", "pitch", "rate"],
+    input_  = ["x_pose", "linear_speed_x", "flip", "rate", "u"]
+    output_ = ["x_pose", "linear_speed_x", "flip", "rate"]
 
-    input_=["pitch", "rate", "u"]
-    output_=["pitch", "rate"]
+    # input_=["pitch", "rate", "u"]
+    # output_=["pitch", "rate"]
 
     # modes: derivative, delta, next
     mode = "derivative"

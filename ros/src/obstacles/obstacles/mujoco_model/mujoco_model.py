@@ -119,7 +119,7 @@ class MujocoImuNode(Node):
             z0 = 0.24
         else:
             quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=self.data.qpos.dtype)  # upright
-            z0 = 0.41
+            z0 = 0.14
 
         # Set base pose (freejoint qpos: x,y,z,qw,qx,qy,qz)
         self.data.qpos[self.free_qpos_adr + 0] = 0.0
