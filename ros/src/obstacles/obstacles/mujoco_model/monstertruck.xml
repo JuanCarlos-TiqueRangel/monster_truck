@@ -123,7 +123,7 @@
   <actuator>
     <motor name="drive_motor" tendon="drive"
            ctrllimited="true" ctrlrange="-1 1"
-           gear="11.0"/>
+           gear="8.0"/>
   </actuator>
 
   <sensor>
