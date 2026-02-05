@@ -61,3 +61,6 @@ WARNING: Nan, Inf or huge value in CTRL at ACTUATOR 0. The simulation is unstabl
 Wed Feb  4 17:07:58 2026
 ERROR: could not initialize GLFW
 
+Thu Feb  5 00:16:36 2026
+ERROR: could not initialize GLFW
+

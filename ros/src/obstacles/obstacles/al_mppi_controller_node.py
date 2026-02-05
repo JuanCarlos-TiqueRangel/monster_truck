@@ -58,7 +58,7 @@ class MPPIConfig:
 
     # Target / stop conditions
     pitch_target: float = 1.2 #math.pi/2.0
-    flip_stop_abs: float = 3.0
+    flip_stop_abs: float = 2.2
 
     # Paths to trained GP models
     # gp_flip_path: str = "gp/models/gp_dynamics_pitch_d_dt.pt"
@@ -91,7 +91,7 @@ class MPPIConfig:
     
     episode_timeout_sec: float = 20.0   # hard timeout for an episode (s)
     
-    entropy_beta: float = 0.0      # set e.g. 0.05–0.5 to encourage exploration
+    entropy_beta: float = 0.1      # set e.g. 0.05–0.5 to encourage exploration
     entropy_use_log: bool = True   # log-variance entropy (stable)
     entropy_var_floor: float = 1e-6
     entropy_var_cap: float = 1e2
@@ -102,7 +102,7 @@ class MPPIConfig:
 
     seed_episode_id: int = -1                           # fixed “seed episode”
     keep_seed: bool = True                              # always include seed points
-    retrain_every_episodes: int = 100   # or 20
+    retrain_every_episodes: int = 20   # or 20
 
     # ---- obstacle trigger (wheelie only when close) ----
     obs_trigger_dist: float = 1.0       # [m] start wheelie around here
@@ -211,6 +211,8 @@ class MPPICarControllerNode(Node):
         self.log_ep   = deque(maxlen=self.cfg.max_log_points)
         self.log_x  = deque(maxlen=self.cfg.max_log_points)
         self.log_vx = deque(maxlen=self.cfg.max_log_points)
+        
+        self.log_cost_j = 0.0
 
 
         # ==========================
@@ -245,6 +247,7 @@ class MPPICarControllerNode(Node):
         self.live_plot_ok = False
         self.ep_hist = []
         self.t_hist = []
+        self.c_hist = []
         if self.cfg.live_plot:
             self._init_live_plot()
 
@@ -267,7 +270,7 @@ class MPPICarControllerNode(Node):
             self.fig, self.ax = plt.subplots()
             (self.line,) = self.ax.plot([], [], marker="o")
             self.ax.set_xlabel("Episode")
-            self.ax.set_ylabel("Time_to_goal_sec")
+            self.ax.set_ylabel("cost")
             self.ax.grid(True)
             try:
                 self.fig.canvas.manager.set_window_title("Learning Curve: Episode vs Time_to_goal_sec")
@@ -280,14 +283,16 @@ class MPPICarControllerNode(Node):
             self.live_plot_ok = False
             self.get_logger().warn(f"Live plot disabled (matplotlib init failed): {e}")
 
-    def _update_live_plot(self, ep: int, flip_time: float):
+    def _update_live_plot(self, ep: int, flip_time: float, cost: float):
         if not self.live_plot_ok:
             return
 
         self.ep_hist.append(ep)
         self.t_hist.append(flip_time)
+        self.c_hist.append(cost)
 
-        self.line.set_data(self.ep_hist, self.t_hist)
+        # self.line.set_data(self.ep_hist, self.t_hist)
+        self.line.set_data(self.ep_hist, self.c_hist)
         self.ax.relim()
         self.ax.autoscale_view()
 
@@ -514,6 +519,8 @@ class MPPICarControllerNode(Node):
             if ent is not None:
                 stage = stage - beta * ent
             costs = costs + stage
+
+        self.log_cost_j = costs.mean().item()
 
         J_min = costs.min()
         w = torch.exp(-(costs - J_min) / cfg.lambda_)
@@ -927,13 +934,12 @@ class MPPICarControllerNode(Node):
             f"Episode {ep} time_to_goal: {dt:.3f} s | retrain_started={int(retrain_started)}"
                                )
 
-
         with open(self.metrics_path, "a", newline="") as f:
             w = csv.writer(f)
             w.writerow([ep, float(dt), int(retrain_started)])
 
         # live plot update
-        self._update_live_plot(ep, float(dt))
+        self._update_live_plot(ep, float(dt), self.log_cost_j)
 
         # reset to avoid double logging
         self.episode_start_time = None
