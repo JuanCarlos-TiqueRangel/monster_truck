@@ -57,7 +57,7 @@ class MPPIConfig:
     u_max: float = 1.0
 
     # Target / stop conditions
-    pitch_target: float = 1.2 #math.pi/2.0
+    pitch_target: float = 1.39 #math.pi/2.0
     flip_stop_abs: float = 2.2
 
     # Paths to trained GP models
@@ -74,7 +74,7 @@ class MPPIConfig:
     max_log_points: int = 200_000
 
     # ---- retrain ----
-    min_points_to_train: int = 2_000
+    min_points_to_train: int = 20
     N_target_train: int = 1_000
     train_kernel: str = "RQ"
     train_iters: int = 300
@@ -83,7 +83,7 @@ class MPPIConfig:
     max_points_for_train: int = 50_000
 
     # retrain trigger
-    min_new_points_between_trains: int = 500
+    min_new_points_between_trains: int = 20
 
     # ---- live learning curve plot ----
     live_plot: bool = True
@@ -91,7 +91,7 @@ class MPPIConfig:
     
     episode_timeout_sec: float = 20.0   # hard timeout for an episode (s)
     
-    entropy_beta: float = 0.1      # set e.g. 0.05–0.5 to encourage exploration
+    entropy_beta: float = 0.0      # set e.g. 0.05–0.5 to encourage exploration
     entropy_use_log: bool = True   # log-variance entropy (stable)
     entropy_var_floor: float = 1e-6
     entropy_var_cap: float = 1e2
@@ -102,7 +102,7 @@ class MPPIConfig:
 
     seed_episode_id: int = -1                           # fixed “seed episode”
     keep_seed: bool = True                              # always include seed points
-    retrain_every_episodes: int = 20   # or 20
+    retrain_every_episodes: int = 1   # or 20
 
     # ---- obstacle trigger (wheelie only when close) ----
     obs_trigger_dist: float = 1.0       # [m] start wheelie around here
@@ -111,7 +111,7 @@ class MPPIConfig:
     # ---- weights ----
     w_flat: float = 6.0
     w_wheelie: float = 1.5
-    w_u: float = 0.01
+    w_u: float = 100.1
     w_rate: float = 2.0
 
     # safety: prevent over-rotation (wheelie not full flip)
@@ -125,7 +125,7 @@ class MPPIConfig:
     goal_x: float = 5.0      # example: set this to “past the obstacle”
     w_goal: float = 3.0
     w_vx: float = 0.5
-    v_des: float = 1.0       # desired forward speed
+    v_des: float = 0.0       # desired forward speed
 
     wheelie_hold_sigma_scale: float = 0.25   # reduce sigma during hold
     wheelie_hold_extra_wheelie: float = 2.0  # increase wheelie weight during hold
@@ -401,25 +401,44 @@ class MPPICarControllerNode(Node):
         err_wheelie = geometry.angdiff_torch(pitch, self.pitch_target_t)
         err_flat    = pitch
 
-        cost_pitch = (1.0 - g) * self.cfg.w_flat    * (err_flat ** 2) \
-                + (g)       * self.cfg.w_wheelie * (err_wheelie ** 2)
+        #cost_pitch = (1.0 - g) * self.cfg.w_flat    * (err_flat ** 2) \
+        #        + (g)       * self.cfg.w_wheelie * (err_wheelie ** 2)
+        
 
         # goal + speed
         goal_x = float(self.cfg.goal_x)
         goal_scale = (1.0 - 0.7 * g)  # still cares about goal near obstacle
-        cost_goal  = goal_scale * self.cfg.w_goal * (x - goal_x)**2
-        cost_vx    = goal_scale * self.cfg.w_vx   * (vx - float(self.cfg.v_des))**2
+        #cost_goal  = goal_scale * self.cfg.w_goal * (x - goal_x)**2
+        cost_goal  = self.cfg.w_goal * (x - goal_x)**2
+        #cost_vx    = goal_scale * self.cfg.w_vx   * (vx - float(self.cfg.v_des))**2
+        cost_vx    = 600.0 * (vx)**2
 
 
         # regularization
         cost_u    = self.cfg.w_u * (u ** 2)
         cost_rate = self.cfg.w_rate * (rate ** 2)
 
-        # pitch limit safety
+        # pi-tch limit safety
         pitch_lim = float(self.cfg.pitch_limit)
         cost_lim  = self.cfg.w_pitch_limit * torch.relu(torch.abs(pitch) - pitch_lim) ** 2
 
-        return cost_pitch + cost_goal + cost_vx + cost_u + cost_rate + cost_lim
+        thr = 1.39
+        cost_pitch = torch.where(
+            err_wheelie < thr,
+            torch.zeros_like(err_wheelie),
+            torch.full_like(err_wheelie, 100.0)
+        )
+
+        # cost_pitch = 0
+        # if err_wheelie < 1.39:
+        #     cost_pitch = 0
+        # else:
+        #     cost_pitch = 100
+
+        #cost_pitch = 0 if err_wheelie < 1.39 else 100
+        #return cost_pitch + cost_goal + cost_vx + cost_u + cost_rate + cost_lim
+        return cost_goal + cost_vx*0 + cost_pitch*0 + cost_u
+        #return cost_pitch + cost_goal + cost_vx + cost_u + cost_rate + cost_lim
 
 
 
@@ -599,7 +618,7 @@ class MPPICarControllerNode(Node):
                     f"(limit={cfg.episode_timeout_sec:.2f}s). Forcing reset."
                 )
 
-                self._record_episode_metric(retrain_started=False)
+                self._record_episode_metric(retrain_started=True)
                 self.wheelie_hold_steps = 0
                 self.publish_u(0.0)
                 self.request_reset(force=True)
