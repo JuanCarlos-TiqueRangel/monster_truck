@@ -136,17 +136,17 @@ def find_models_dir(script_dir: Path) -> Path:
 
 
 def main():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda")
 
     script_dir = Path(__file__).resolve().parent     # obstacles/gp
     obstacles_dir = script_dir.parent                # obstacles
-    npz_path = obstacles_dir / "data" / "mujoco_random_wheelie.npz"
+    npz_path = obstacles_dir / "data" / "mujoco_manual_wheelie.npz"
 
-    # input_=["x_pose", "linear_speed_x", "pitch", "rate", "u"],
-    # output_=["x_pose", "linear_speed_x", "pitch", "rate"],
+    input_  = ["x_pose", "linear_speed_x", "flip", "rate", "u"]
+    output_ = ["x_pose", "linear_speed_x", "flip", "rate"]
 
-    input_=["pitch", "rate", "u"]
-    output_=["pitch", "rate"]
+    # input_=["pitch", "rate", "u"]
+    # output_=["pitch", "rate"]
 
     cfg = EvalConfig(
         dt=0.1,
