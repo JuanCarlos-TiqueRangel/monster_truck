@@ -1,0 +1,39 @@
+services:
+  mppi_torch:
+    build:
+      context: .
+      dockerfile: torch.Dockerfile
+    container_name: mppi_torch
+    network_mode: host
+    ipc: host
+    pid: host
+    gpus: all
+    environment:
+      ROS_DOMAIN_ID: "42"
+      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+    volumes:
+      - ../src:/ros_ws/src:rw
+    working_dir: /ros_ws/src
+    tty: true
+    stdin_open: true
+    command: ["bash", "-lc", "source /opt/ros/jazzy/setup.bash && echo 'torch container ready' && tail -f /dev/null"]
+
+  mppi_tf:
+    build:
+      context: .
+      dockerfile: tensorflow.Dockerfile
+    container_name: mppi_tf
+    network_mode: host
+    ipc: host
+    pid: host
+    gpus: all
+    environment:
+      ROS_DOMAIN_ID: "42"
+      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+      TF_CPP_MIN_LOG_LEVEL: "1"
+    volumes:
+      - ../src:/ros_ws/src:rw
+    working_dir: /ros_ws/src
+    tty: true
+    stdin_open: true
+    command: ["bash", "-lc", "source /opt/ros/jazzy/setup.bash && echo 'tf container ready' && tail -f /dev/null"]

@@ -1,0 +1,67 @@
+[0.666s] Invoking command in '/ros_ws/src/online_gp': PYTHONPATH=/ros_ws/build/online_gp/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/install/online_gp/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/online_gp build --build-base /ros_ws/build/online_gp/build install --record /ros_ws/build/online_gp/install.log --single-version-externally-managed install_data
+[0.775s] running egg_info
+[0.775s] creating ../../build/online_gp/online_gp.egg-info
+[0.781s] writing ../../build/online_gp/online_gp.egg-info/PKG-INFO
+[0.781s] writing dependency_links to ../../build/online_gp/online_gp.egg-info/dependency_links.txt
+[0.781s] writing requirements to ../../build/online_gp/online_gp.egg-info/requires.txt
+[0.781s] writing top-level names to ../../build/online_gp/online_gp.egg-info/top_level.txt
+[0.781s] writing manifest file '../../build/online_gp/online_gp.egg-info/SOURCES.txt'
+[0.793s] reading manifest file '../../build/online_gp/online_gp.egg-info/SOURCES.txt'
+[0.794s] writing manifest file '../../build/online_gp/online_gp.egg-info/SOURCES.txt'
+[0.794s] running build
+[0.794s] running build_py
+[0.794s] creating /ros_ws/build/online_gp/build
+[0.794s] creating /ros_ws/build/online_gp/build/lib
+[0.794s] creating /ros_ws/build/online_gp/build/lib/online_gp
+[0.794s] copying online_gp/collect_data.py -> /ros_ws/build/online_gp/build/lib/online_gp
+[0.794s] copying online_gp/manual_car.py -> /ros_ws/build/online_gp/build/lib/online_gp
+[0.794s] copying online_gp/__init__.py -> /ros_ws/build/online_gp/build/lib/online_gp
+[0.794s] copying online_gp/manual_data_collection.py -> /ros_ws/build/online_gp/build/lib/online_gp
+[0.794s] copying online_gp/al_mppi_controller_node.py -> /ros_ws/build/online_gp/build/lib/online_gp
+[0.794s] creating /ros_ws/build/online_gp/build/lib/online_gp/gp
+[0.794s] copying online_gp/gp/re_train_dynamics_gp.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp
+[0.794s] copying online_gp/gp/train_dynamics_gp.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp
+[0.794s] copying online_gp/gp/gp_dynamics.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp
+[0.794s] copying online_gp/gp/train_dynamics_svgp.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp
+[0.794s] copying online_gp/gp/eval_gp_models.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp
+[0.794s] copying online_gp/gp/__init__.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp
+[0.794s] copying online_gp/gp/svgp_dynamics.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp
+[0.794s] running install
+[0.797s] running install_lib
+[0.803s] creating /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp
+[0.803s] copying /ros_ws/build/online_gp/build/lib/online_gp/collect_data.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp
+[0.803s] copying /ros_ws/build/online_gp/build/lib/online_gp/manual_car.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp
+[0.804s] copying /ros_ws/build/online_gp/build/lib/online_gp/__init__.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp
+[0.804s] copying /ros_ws/build/online_gp/build/lib/online_gp/manual_data_collection.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp
+[0.804s] creating /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+[0.804s] copying /ros_ws/build/online_gp/build/lib/online_gp/gp/re_train_dynamics_gp.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+[0.804s] copying /ros_ws/build/online_gp/build/lib/online_gp/gp/train_dynamics_gp.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+[0.804s] copying /ros_ws/build/online_gp/build/lib/online_gp/gp/gp_dynamics.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+[0.804s] copying /ros_ws/build/online_gp/build/lib/online_gp/gp/train_dynamics_svgp.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+[0.804s] copying /ros_ws/build/online_gp/build/lib/online_gp/gp/eval_gp_models.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+[0.804s] copying /ros_ws/build/online_gp/build/lib/online_gp/gp/__init__.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+[0.804s] copying /ros_ws/build/online_gp/build/lib/online_gp/gp/svgp_dynamics.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+[0.804s] copying /ros_ws/build/online_gp/build/lib/online_gp/al_mppi_controller_node.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp
+[0.804s] byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/collect_data.py to collect_data.cpython-312.pyc
+[0.805s] byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/manual_car.py to manual_car.cpython-312.pyc
+[0.806s] byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/__init__.py to __init__.cpython-312.pyc
+[0.806s] byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/manual_data_collection.py to manual_data_collection.cpython-312.pyc
+[0.807s] byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/re_train_dynamics_gp.py to re_train_dynamics_gp.cpython-312.pyc
+[0.810s] byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/train_dynamics_gp.py to train_dynamics_gp.cpython-312.pyc
+[0.810s] byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/gp_dynamics.py to gp_dynamics.cpython-312.pyc
+[0.810s] byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/train_dynamics_svgp.py to train_dynamics_svgp.cpython-312.pyc
+[0.811s] byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/eval_gp_models.py to eval_gp_models.cpython-312.pyc
+[0.811s] byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/__init__.py to __init__.cpython-312.pyc
+[0.812s] byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/svgp_dynamics.py to svgp_dynamics.cpython-312.pyc
+[0.813s] byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/al_mppi_controller_node.py to al_mppi_controller_node.cpython-312.pyc
+[0.816s] running install_data
+[0.816s] creating /ros_ws/install/online_gp/share/ament_index
+[0.816s] creating /ros_ws/install/online_gp/share/ament_index/resource_index
+[0.816s] creating /ros_ws/install/online_gp/share/ament_index/resource_index/packages
+[0.816s] copying resource/online_gp -> /ros_ws/install/online_gp/share/ament_index/resource_index/packages
+[0.816s] copying package.xml -> /ros_ws/install/online_gp/share/online_gp
+[0.816s] running install_egg_info
+[0.824s] Copying ../../build/online_gp/online_gp.egg-info to /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp-0.0.0-py3.12.egg-info
+[0.824s] running install_scripts
+[0.871s] writing list of installed files to '/ros_ws/build/online_gp/install.log'
+[0.886s] Invoked command in '/ros_ws/src/online_gp' returned '0': PYTHONPATH=/ros_ws/build/online_gp/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/install/online_gp/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/online_gp build --build-base /ros_ws/build/online_gp/build install --record /ros_ws/build/online_gp/install.log --single-version-externally-managed install_data

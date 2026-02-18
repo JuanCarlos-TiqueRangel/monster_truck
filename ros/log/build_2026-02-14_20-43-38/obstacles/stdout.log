@@ -1,0 +1,65 @@
+running egg_info
+creating ../../build/obstacles/obstacles.egg-info
+writing ../../build/obstacles/obstacles.egg-info/PKG-INFO
+writing dependency_links to ../../build/obstacles/obstacles.egg-info/dependency_links.txt
+writing requirements to ../../build/obstacles/obstacles.egg-info/requires.txt
+writing top-level names to ../../build/obstacles/obstacles.egg-info/top_level.txt
+writing manifest file '../../build/obstacles/obstacles.egg-info/SOURCES.txt'
+reading manifest file '../../build/obstacles/obstacles.egg-info/SOURCES.txt'
+writing manifest file '../../build/obstacles/obstacles.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /ros_ws/build/obstacles/build
+creating /ros_ws/build/obstacles/build/lib
+creating /ros_ws/build/obstacles/build/lib/obstacles
+copying obstacles/collect_data.py -> /ros_ws/build/obstacles/build/lib/obstacles
+copying obstacles/manual_car.py -> /ros_ws/build/obstacles/build/lib/obstacles
+copying obstacles/__init__.py -> /ros_ws/build/obstacles/build/lib/obstacles
+copying obstacles/manual_data_collection.py -> /ros_ws/build/obstacles/build/lib/obstacles
+copying obstacles/al_mppi_controller_node.py -> /ros_ws/build/obstacles/build/lib/obstacles
+creating /ros_ws/build/obstacles/build/lib/obstacles/gp
+copying obstacles/gp/re_train_dynamics_gp.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp
+copying obstacles/gp/train_dynamics_gp.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp
+copying obstacles/gp/gp_dynamics.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp
+copying obstacles/gp/train_dynamics_svgp.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp
+copying obstacles/gp/eval_gp_models.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp
+copying obstacles/gp/__init__.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp
+copying obstacles/gp/svgp_dynamics.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp
+running install
+running install_lib
+creating /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles
+copying /ros_ws/build/obstacles/build/lib/obstacles/collect_data.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles
+copying /ros_ws/build/obstacles/build/lib/obstacles/manual_car.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles
+copying /ros_ws/build/obstacles/build/lib/obstacles/__init__.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles
+copying /ros_ws/build/obstacles/build/lib/obstacles/manual_data_collection.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles
+creating /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+copying /ros_ws/build/obstacles/build/lib/obstacles/gp/re_train_dynamics_gp.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+copying /ros_ws/build/obstacles/build/lib/obstacles/gp/train_dynamics_gp.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+copying /ros_ws/build/obstacles/build/lib/obstacles/gp/gp_dynamics.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+copying /ros_ws/build/obstacles/build/lib/obstacles/gp/train_dynamics_svgp.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+copying /ros_ws/build/obstacles/build/lib/obstacles/gp/eval_gp_models.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+copying /ros_ws/build/obstacles/build/lib/obstacles/gp/__init__.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+copying /ros_ws/build/obstacles/build/lib/obstacles/gp/svgp_dynamics.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+copying /ros_ws/build/obstacles/build/lib/obstacles/al_mppi_controller_node.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles
+byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/collect_data.py to collect_data.cpython-312.pyc
+byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/manual_car.py to manual_car.cpython-312.pyc
+byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/__init__.py to __init__.cpython-312.pyc
+byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/manual_data_collection.py to manual_data_collection.cpython-312.pyc
+byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/re_train_dynamics_gp.py to re_train_dynamics_gp.cpython-312.pyc
+byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/train_dynamics_gp.py to train_dynamics_gp.cpython-312.pyc
+byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/gp_dynamics.py to gp_dynamics.cpython-312.pyc
+byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/train_dynamics_svgp.py to train_dynamics_svgp.cpython-312.pyc
+byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/eval_gp_models.py to eval_gp_models.cpython-312.pyc
+byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/__init__.py to __init__.cpython-312.pyc
+byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/svgp_dynamics.py to svgp_dynamics.cpython-312.pyc
+byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/al_mppi_controller_node.py to al_mppi_controller_node.cpython-312.pyc
+running install_data
+creating /ros_ws/install/obstacles/share/ament_index
+creating /ros_ws/install/obstacles/share/ament_index/resource_index
+creating /ros_ws/install/obstacles/share/ament_index/resource_index/packages
+copying resource/obstacles -> /ros_ws/install/obstacles/share/ament_index/resource_index/packages
+copying package.xml -> /ros_ws/install/obstacles/share/obstacles
+running install_egg_info
+Copying ../../build/obstacles/obstacles.egg-info to /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles-0.0.0-py3.12.egg-info
+running install_scripts
+writing list of installed files to '/ros_ws/build/obstacles/install.log'

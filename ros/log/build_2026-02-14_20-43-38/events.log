@@ -1,0 +1,201 @@
+[0.000000] (-) TimerEvent: {}
+[0.000370] (control) JobQueued: {'identifier': 'control', 'dependencies': OrderedDict()}
+[0.000400] (obstacles) JobQueued: {'identifier': 'obstacles', 'dependencies': OrderedDict()}
+[0.000438] (online_gp) JobQueued: {'identifier': 'online_gp', 'dependencies': OrderedDict()}
+[0.000449] (training) JobQueued: {'identifier': 'training', 'dependencies': OrderedDict()}
+[0.000458] (control) JobStarted: {'identifier': 'control'}
+[0.007051] (obstacles) JobStarted: {'identifier': 'obstacles'}
+[0.009594] (online_gp) JobStarted: {'identifier': 'online_gp'}
+[0.011580] (training) JobStarted: {'identifier': 'training'}
+[0.100188] (-) TimerEvent: {}
+[0.200699] (-) TimerEvent: {}
+[0.301178] (-) TimerEvent: {}
+[0.401366] (-) TimerEvent: {}
+[0.501668] (-) TimerEvent: {}
+[0.601860] (-) TimerEvent: {}
+[0.676299] (online_gp) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'egg_info', '--egg-base', '../../build/online_gp', 'build', '--build-base', '/ros_ws/build/online_gp/build', 'install', '--record', '/ros_ws/build/online_gp/install.log', '--single-version-externally-managed', 'install_data'], 'cwd': '/ros_ws/src/online_gp', 'env': {'NVIDIA_CTK_LIBCUDA_DIR': '/usr/lib/x86_64-linux-gnu', 'HOSTNAME': 'juan', 'SHLVL': '1', 'LD_LIBRARY_PATH': '/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib', 'HOME': '/root', 'OLDPWD': '/ros_ws/src', 'ROS_PYTHON_VERSION': '3', 'ROS_DISTRO': 'jazzy', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'PIP_BREAK_SYSTEM_PACKAGES': '1', 'TERM': 'xterm', 'PATH': '/opt/ros/jazzy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'DISPLAY': ':1', 'LANG': 'C.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:', 'AMENT_PREFIX_PATH': '/opt/ros/jazzy', 'DEBIAN_FRONTEND': 'noninteractive', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET', 'PWD': '/ros_ws/build/online_gp', 'LC_ALL': 'C.UTF-8', 'PYTHONPATH': '/ros_ws/build/online_gp/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/install/online_gp/lib/python3.12/site-packages:/opt/ros/jazzy/lib/python3.12/site-packages', 'NVIDIA_VISIBLE_DEVICES': 'void', 'COLCON': '1', 'CMAKE_PREFIX_PATH': '/opt/ros/jazzy/opt/gz_math_vendor:/opt/ros/jazzy/opt/gz_utils_vendor:/opt/ros/jazzy/opt/gz_cmake_vendor'}, 'shell': False}
+[0.679653] (control) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'egg_info', '--egg-base', '../../build/control', 'build', '--build-base', '/ros_ws/build/control/build', 'install', '--record', '/ros_ws/build/control/install.log', '--single-version-externally-managed', 'install_data'], 'cwd': '/ros_ws/src/control', 'env': {'NVIDIA_CTK_LIBCUDA_DIR': '/usr/lib/x86_64-linux-gnu', 'HOSTNAME': 'juan', 'SHLVL': '1', 'LD_LIBRARY_PATH': '/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib', 'HOME': '/root', 'OLDPWD': '/ros_ws/src', 'ROS_PYTHON_VERSION': '3', 'ROS_DISTRO': 'jazzy', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'PIP_BREAK_SYSTEM_PACKAGES': '1', 'TERM': 'xterm', 'PATH': '/opt/ros/jazzy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'DISPLAY': ':1', 'LANG': 'C.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:', 'AMENT_PREFIX_PATH': '/opt/ros/jazzy', 'DEBIAN_FRONTEND': 'noninteractive', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET', 'PWD': '/ros_ws/build/control', 'LC_ALL': 'C.UTF-8', 'PYTHONPATH': '/ros_ws/build/control/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/install/control/lib/python3.12/site-packages:/opt/ros/jazzy/lib/python3.12/site-packages', 'NVIDIA_VISIBLE_DEVICES': 'void', 'COLCON': '1', 'CMAKE_PREFIX_PATH': '/opt/ros/jazzy/opt/gz_math_vendor:/opt/ros/jazzy/opt/gz_utils_vendor:/opt/ros/jazzy/opt/gz_cmake_vendor'}, 'shell': False}
+[0.680395] (obstacles) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'egg_info', '--egg-base', '../../build/obstacles', 'build', '--build-base', '/ros_ws/build/obstacles/build', 'install', '--record', '/ros_ws/build/obstacles/install.log', '--single-version-externally-managed', 'install_data'], 'cwd': '/ros_ws/src/obstacles', 'env': {'NVIDIA_CTK_LIBCUDA_DIR': '/usr/lib/x86_64-linux-gnu', 'HOSTNAME': 'juan', 'SHLVL': '1', 'LD_LIBRARY_PATH': '/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib', 'HOME': '/root', 'OLDPWD': '/ros_ws/src', 'ROS_PYTHON_VERSION': '3', 'ROS_DISTRO': 'jazzy', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'PIP_BREAK_SYSTEM_PACKAGES': '1', 'TERM': 'xterm', 'PATH': '/opt/ros/jazzy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'DISPLAY': ':1', 'LANG': 'C.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:', 'AMENT_PREFIX_PATH': '/opt/ros/jazzy', 'DEBIAN_FRONTEND': 'noninteractive', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET', 'PWD': '/ros_ws/build/obstacles', 'LC_ALL': 'C.UTF-8', 'PYTHONPATH': '/ros_ws/build/obstacles/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/install/obstacles/lib/python3.12/site-packages:/opt/ros/jazzy/lib/python3.12/site-packages', 'NVIDIA_VISIBLE_DEVICES': 'void', 'COLCON': '1', 'CMAKE_PREFIX_PATH': '/opt/ros/jazzy/opt/gz_math_vendor:/opt/ros/jazzy/opt/gz_utils_vendor:/opt/ros/jazzy/opt/gz_cmake_vendor'}, 'shell': False}
+[0.682519] (training) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'egg_info', '--egg-base', '../../build/training', 'build', '--build-base', '/ros_ws/build/training/build', 'install', '--record', '/ros_ws/build/training/install.log', '--single-version-externally-managed', 'install_data'], 'cwd': '/ros_ws/src/training', 'env': {'NVIDIA_CTK_LIBCUDA_DIR': '/usr/lib/x86_64-linux-gnu', 'HOSTNAME': 'juan', 'SHLVL': '1', 'LD_LIBRARY_PATH': '/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib', 'HOME': '/root', 'OLDPWD': '/ros_ws/src', 'ROS_PYTHON_VERSION': '3', 'ROS_DISTRO': 'jazzy', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'PIP_BREAK_SYSTEM_PACKAGES': '1', 'TERM': 'xterm', 'PATH': '/opt/ros/jazzy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'DISPLAY': ':1', 'LANG': 'C.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:', 'AMENT_PREFIX_PATH': '/opt/ros/jazzy', 'DEBIAN_FRONTEND': 'noninteractive', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET', 'PWD': '/ros_ws/build/training', 'LC_ALL': 'C.UTF-8', 'PYTHONPATH': '/ros_ws/build/training/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/install/training/lib/python3.12/site-packages:/opt/ros/jazzy/lib/python3.12/site-packages', 'NVIDIA_VISIBLE_DEVICES': 'void', 'COLCON': '1', 'CMAKE_PREFIX_PATH': '/opt/ros/jazzy/opt/gz_math_vendor:/opt/ros/jazzy/opt/gz_utils_vendor:/opt/ros/jazzy/opt/gz_cmake_vendor'}, 'shell': False}
+[0.701935] (-) TimerEvent: {}
+[0.784768] (online_gp) StdoutLine: {'line': b'running egg_info\n'}
+[0.784989] (online_gp) StdoutLine: {'line': b'creating ../../build/online_gp/online_gp.egg-info\n'}
+[0.788359] (obstacles) StdoutLine: {'line': b'running egg_info\n'}
+[0.788525] (obstacles) StdoutLine: {'line': b'creating ../../build/obstacles/obstacles.egg-info\n'}
+[0.789276] (control) StdoutLine: {'line': b'running egg_info\n'}
+[0.790884] (online_gp) StdoutLine: {'line': b'writing ../../build/online_gp/online_gp.egg-info/PKG-INFO\n'}
+[0.790956] (online_gp) StdoutLine: {'line': b'writing dependency_links to ../../build/online_gp/online_gp.egg-info/dependency_links.txt\n'}
+[0.790991] (online_gp) StdoutLine: {'line': b'writing requirements to ../../build/online_gp/online_gp.egg-info/requires.txt\n'}
+[0.791023] (online_gp) StdoutLine: {'line': b'writing top-level names to ../../build/online_gp/online_gp.egg-info/top_level.txt\n'}
+[0.791052] (online_gp) StdoutLine: {'line': b"writing manifest file '../../build/online_gp/online_gp.egg-info/SOURCES.txt'\n"}
+[0.793827] (training) StdoutLine: {'line': b'running egg_info\n'}
+[0.794705] (obstacles) StdoutLine: {'line': b'writing ../../build/obstacles/obstacles.egg-info/PKG-INFO\n'}
+[0.794775] (obstacles) StdoutLine: {'line': b'writing dependency_links to ../../build/obstacles/obstacles.egg-info/dependency_links.txt\n'}
+[0.794828] (obstacles) StdoutLine: {'line': b'writing requirements to ../../build/obstacles/obstacles.egg-info/requires.txt\n'}
+[0.794864] (obstacles) StdoutLine: {'line': b'writing top-level names to ../../build/obstacles/obstacles.egg-info/top_level.txt\n'}
+[0.794907] (obstacles) StdoutLine: {'line': b"writing manifest file '../../build/obstacles/obstacles.egg-info/SOURCES.txt'\n"}
+[0.795431] (control) StdoutLine: {'line': b'writing ../../build/control/control.egg-info/PKG-INFO\n'}
+[0.795566] (control) StdoutLine: {'line': b'writing dependency_links to ../../build/control/control.egg-info/dependency_links.txt\n'}
+[0.795628] (control) StdoutLine: {'line': b'writing requirements to ../../build/control/control.egg-info/requires.txt\n'}
+[0.795663] (control) StdoutLine: {'line': b'writing top-level names to ../../build/control/control.egg-info/top_level.txt\n'}
+[0.799830] (training) StdoutLine: {'line': b'writing ../../build/training/training.egg-info/PKG-INFO\n'}
+[0.799907] (training) StdoutLine: {'line': b'writing dependency_links to ../../build/training/training.egg-info/dependency_links.txt\n'}
+[0.799944] (training) StdoutLine: {'line': b'writing requirements to ../../build/training/training.egg-info/requires.txt\n'}
+[0.800099] (training) StdoutLine: {'line': b'writing top-level names to ../../build/training/training.egg-info/top_level.txt\n'}
+[0.802091] (-) TimerEvent: {}
+[0.803589] (online_gp) StdoutLine: {'line': b"reading manifest file '../../build/online_gp/online_gp.egg-info/SOURCES.txt'\n"}
+[0.803914] (online_gp) StdoutLine: {'line': b"writing manifest file '../../build/online_gp/online_gp.egg-info/SOURCES.txt'\n"}
+[0.803995] (online_gp) StdoutLine: {'line': b'running build\n'}
+[0.804032] (online_gp) StdoutLine: {'line': b'running build_py\n'}
+[0.804065] (online_gp) StdoutLine: {'line': b'creating /ros_ws/build/online_gp/build\n'}
+[0.804096] (online_gp) StdoutLine: {'line': b'creating /ros_ws/build/online_gp/build/lib\n'}
+[0.804127] (online_gp) StdoutLine: {'line': b'creating /ros_ws/build/online_gp/build/lib/online_gp\n'}
+[0.804160] (online_gp) StdoutLine: {'line': b'copying online_gp/collect_data.py -> /ros_ws/build/online_gp/build/lib/online_gp\n'}
+[0.804192] (online_gp) StdoutLine: {'line': b'copying online_gp/manual_car.py -> /ros_ws/build/online_gp/build/lib/online_gp\n'}
+[0.804234] (online_gp) StdoutLine: {'line': b'copying online_gp/__init__.py -> /ros_ws/build/online_gp/build/lib/online_gp\n'}
+[0.804265] (online_gp) StdoutLine: {'line': b'copying online_gp/manual_data_collection.py -> /ros_ws/build/online_gp/build/lib/online_gp\n'}
+[0.804296] (online_gp) StdoutLine: {'line': b'copying online_gp/al_mppi_controller_node.py -> /ros_ws/build/online_gp/build/lib/online_gp\n'}
+[0.804325] (online_gp) StdoutLine: {'line': b'creating /ros_ws/build/online_gp/build/lib/online_gp/gp\n'}
+[0.804356] (online_gp) StdoutLine: {'line': b'copying online_gp/gp/re_train_dynamics_gp.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp\n'}
+[0.804541] (online_gp) StdoutLine: {'line': b'copying online_gp/gp/train_dynamics_gp.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp\n'}
+[0.804602] (online_gp) StdoutLine: {'line': b'copying online_gp/gp/gp_dynamics.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp\n'}
+[0.804638] (online_gp) StdoutLine: {'line': b'copying online_gp/gp/train_dynamics_svgp.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp\n'}
+[0.804679] (online_gp) StdoutLine: {'line': b'copying online_gp/gp/eval_gp_models.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp\n'}
+[0.804710] (online_gp) StdoutLine: {'line': b'copying online_gp/gp/__init__.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp\n'}
+[0.804740] (online_gp) StdoutLine: {'line': b'copying online_gp/gp/svgp_dynamics.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp\n'}
+[0.804770] (online_gp) StdoutLine: {'line': b'running install\n'}
+[0.807184] (online_gp) StdoutLine: {'line': b'running install_lib\n'}
+[0.807520] (obstacles) StdoutLine: {'line': b"reading manifest file '../../build/obstacles/obstacles.egg-info/SOURCES.txt'\n"}
+[0.807831] (obstacles) StdoutLine: {'line': b"writing manifest file '../../build/obstacles/obstacles.egg-info/SOURCES.txt'\n"}
+[0.807865] (obstacles) StdoutLine: {'line': b'running build\n'}
+[0.807896] (obstacles) StdoutLine: {'line': b'running build_py\n'}
+[0.807954] (obstacles) StdoutLine: {'line': b'creating /ros_ws/build/obstacles/build\n'}
+[0.807997] (obstacles) StdoutLine: {'line': b'creating /ros_ws/build/obstacles/build/lib\n'}
+[0.808028] (obstacles) StdoutLine: {'line': b'creating /ros_ws/build/obstacles/build/lib/obstacles\n'}
+[0.808058] (obstacles) StdoutLine: {'line': b'copying obstacles/collect_data.py -> /ros_ws/build/obstacles/build/lib/obstacles\n'}
+[0.808088] (control) StdoutLine: {'line': b"reading manifest file '../../build/control/control.egg-info/SOURCES.txt'\n"}
+[0.808174] (obstacles) StdoutLine: {'line': b'copying obstacles/manual_car.py -> /ros_ws/build/obstacles/build/lib/obstacles\n'}
+[0.808206] (obstacles) StdoutLine: {'line': b'copying obstacles/__init__.py -> /ros_ws/build/obstacles/build/lib/obstacles\n'}
+[0.808235] (obstacles) StdoutLine: {'line': b'copying obstacles/manual_data_collection.py -> /ros_ws/build/obstacles/build/lib/obstacles\n'}
+[0.808265] (obstacles) StdoutLine: {'line': b'copying obstacles/al_mppi_controller_node.py -> /ros_ws/build/obstacles/build/lib/obstacles\n'}
+[0.808479] (obstacles) StdoutLine: {'line': b'creating /ros_ws/build/obstacles/build/lib/obstacles/gp\n'}
+[0.808511] (obstacles) StdoutLine: {'line': b'copying obstacles/gp/re_train_dynamics_gp.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp\n'}
+[0.808539] (obstacles) StdoutLine: {'line': b'copying obstacles/gp/train_dynamics_gp.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp\n'}
+[0.808567] (obstacles) StdoutLine: {'line': b'copying obstacles/gp/gp_dynamics.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp\n'}
+[0.808597] (obstacles) StdoutLine: {'line': b'copying obstacles/gp/train_dynamics_svgp.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp\n'}
+[0.808627] (obstacles) StdoutLine: {'line': b'copying obstacles/gp/eval_gp_models.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp\n'}
+[0.808659] (obstacles) StdoutLine: {'line': b'copying obstacles/gp/__init__.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp\n'}
+[0.808888] (obstacles) StdoutLine: {'line': b'copying obstacles/gp/svgp_dynamics.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp\n'}
+[0.808916] (obstacles) StdoutLine: {'line': b'running install\n'}
+[0.808946] (control) StdoutLine: {'line': b"writing manifest file '../../build/control/control.egg-info/SOURCES.txt'\n"}
+[0.808976] (control) StdoutLine: {'line': b'running build\n'}
+[0.809003] (control) StdoutLine: {'line': b'running build_py\n'}
+[0.809031] (control) StdoutLine: {'line': b'running install\n'}
+[0.811138] (obstacles) StdoutLine: {'line': b'running install_lib\n'}
+[0.811187] (control) StdoutLine: {'line': b'running install_lib\n'}
+[0.812634] (training) StdoutLine: {'line': b"reading manifest file '../../build/training/training.egg-info/SOURCES.txt'\n"}
+[0.813443] (online_gp) StdoutLine: {'line': b'creating /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp\n'}
+[0.813477] (online_gp) StdoutLine: {'line': b'copying /ros_ws/build/online_gp/build/lib/online_gp/collect_data.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp\n'}
+[0.813507] (online_gp) StdoutLine: {'line': b'copying /ros_ws/build/online_gp/build/lib/online_gp/manual_car.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp\n'}
+[0.813843] (training) StdoutLine: {'line': b"writing manifest file '../../build/training/training.egg-info/SOURCES.txt'\n"}
+[0.813879] (training) StdoutLine: {'line': b'running build\n'}
+[0.813910] (training) StdoutLine: {'line': b'running build_py\n'}
+[0.813953] (training) StdoutLine: {'line': b'copying training/mujoco_model.py -> /ros_ws/build/training/build/lib/training\n'}
+[0.814013] (online_gp) StdoutLine: {'line': b'copying /ros_ws/build/online_gp/build/lib/online_gp/__init__.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp\n'}
+[0.814043] (training) StdoutLine: {'line': b'copying training/collect_data.py -> /ros_ws/build/training/build/lib/training\n'}
+[0.814073] (training) StdoutLine: {'line': b'running install\n'}
+[0.814101] (online_gp) StdoutLine: {'line': b'copying /ros_ws/build/online_gp/build/lib/online_gp/manual_data_collection.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp\n'}
+[0.814134] (online_gp) StdoutLine: {'line': b'creating /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp\n'}
+[0.814166] (online_gp) StdoutLine: {'line': b'copying /ros_ws/build/online_gp/build/lib/online_gp/gp/re_train_dynamics_gp.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp\n'}
+[0.814208] (online_gp) StdoutLine: {'line': b'copying /ros_ws/build/online_gp/build/lib/online_gp/gp/train_dynamics_gp.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp\n'}
+[0.814239] (online_gp) StdoutLine: {'line': b'copying /ros_ws/build/online_gp/build/lib/online_gp/gp/gp_dynamics.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp\n'}
+[0.814267] (online_gp) StdoutLine: {'line': b'copying /ros_ws/build/online_gp/build/lib/online_gp/gp/train_dynamics_svgp.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp\n'}
+[0.814300] (online_gp) StdoutLine: {'line': b'copying /ros_ws/build/online_gp/build/lib/online_gp/gp/eval_gp_models.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp\n'}
+[0.814330] (online_gp) StdoutLine: {'line': b'copying /ros_ws/build/online_gp/build/lib/online_gp/gp/__init__.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp\n'}
+[0.814358] (online_gp) StdoutLine: {'line': b'copying /ros_ws/build/online_gp/build/lib/online_gp/gp/svgp_dynamics.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp\n'}
+[0.814388] (online_gp) StdoutLine: {'line': b'copying /ros_ws/build/online_gp/build/lib/online_gp/al_mppi_controller_node.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp\n'}
+[0.814415] (online_gp) StdoutLine: {'line': b'byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/collect_data.py to collect_data.cpython-312.pyc\n'}
+[0.815740] (online_gp) StdoutLine: {'line': b'byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/manual_car.py to manual_car.cpython-312.pyc\n'}
+[0.816128] (online_gp) StdoutLine: {'line': b'byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/__init__.py to __init__.cpython-312.pyc\n'}
+[0.816202] (training) StdoutLine: {'line': b'running install_lib\n'}
+[0.816238] (online_gp) StdoutLine: {'line': b'byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/manual_data_collection.py to manual_data_collection.cpython-312.pyc\n'}
+[0.817473] (online_gp) StdoutLine: {'line': b'byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/re_train_dynamics_gp.py to re_train_dynamics_gp.cpython-312.pyc\n'}
+[0.817964] (obstacles) StdoutLine: {'line': b'creating /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles\n'}
+[0.818224] (obstacles) StdoutLine: {'line': b'copying /ros_ws/build/obstacles/build/lib/obstacles/collect_data.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles\n'}
+[0.818328] (obstacles) StdoutLine: {'line': b'copying /ros_ws/build/obstacles/build/lib/obstacles/manual_car.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles\n'}
+[0.818361] (control) StdoutLine: {'line': b'running install_data\n'}
+[0.818410] (control) StdoutLine: {'line': b'running install_egg_info\n'}
+[0.818496] (obstacles) StdoutLine: {'line': b'copying /ros_ws/build/obstacles/build/lib/obstacles/__init__.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles\n'}
+[0.818687] (obstacles) StdoutLine: {'line': b'copying /ros_ws/build/obstacles/build/lib/obstacles/manual_data_collection.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles\n'}
+[0.818876] (obstacles) StdoutLine: {'line': b'creating /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp\n'}
+[0.819064] (obstacles) StdoutLine: {'line': b'copying /ros_ws/build/obstacles/build/lib/obstacles/gp/re_train_dynamics_gp.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp\n'}
+[0.819308] (obstacles) StdoutLine: {'line': b'copying /ros_ws/build/obstacles/build/lib/obstacles/gp/train_dynamics_gp.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp\n'}
+[0.819497] (obstacles) StdoutLine: {'line': b'copying /ros_ws/build/obstacles/build/lib/obstacles/gp/gp_dynamics.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp\n'}
+[0.819688] (obstacles) StdoutLine: {'line': b'copying /ros_ws/build/obstacles/build/lib/obstacles/gp/train_dynamics_svgp.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp\n'}
+[0.819872] (obstacles) StdoutLine: {'line': b'copying /ros_ws/build/obstacles/build/lib/obstacles/gp/eval_gp_models.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp\n'}
+[0.819904] (obstacles) StdoutLine: {'line': b'copying /ros_ws/build/obstacles/build/lib/obstacles/gp/__init__.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp\n'}
+[0.819934] (obstacles) StdoutLine: {'line': b'copying /ros_ws/build/obstacles/build/lib/obstacles/gp/svgp_dynamics.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp\n'}
+[0.819966] (obstacles) StdoutLine: {'line': b'copying /ros_ws/build/obstacles/build/lib/obstacles/al_mppi_controller_node.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles\n'}
+[0.820145] (obstacles) StdoutLine: {'line': b'byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/collect_data.py to collect_data.cpython-312.pyc\n'}
+[0.820178] (online_gp) StdoutLine: {'line': b'byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/train_dynamics_gp.py to train_dynamics_gp.cpython-312.pyc\n'}
+[0.820209] (online_gp) StdoutLine: {'line': b'byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/gp_dynamics.py to gp_dynamics.cpython-312.pyc\n'}
+[0.820238] (online_gp) StdoutLine: {'line': b'byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/train_dynamics_svgp.py to train_dynamics_svgp.cpython-312.pyc\n'}
+[0.820396] (obstacles) StdoutLine: {'line': b'byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/manual_car.py to manual_car.cpython-312.pyc\n'}
+[0.820582] (obstacles) StdoutLine: {'line': b'byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/__init__.py to __init__.cpython-312.pyc\n'}
+[0.820619] (obstacles) StdoutLine: {'line': b'byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/manual_data_collection.py to manual_data_collection.cpython-312.pyc\n'}
+[0.820924] (online_gp) StdoutLine: {'line': b'byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/eval_gp_models.py to eval_gp_models.cpython-312.pyc\n'}
+[0.821588] (obstacles) StdoutLine: {'line': b'byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/re_train_dynamics_gp.py to re_train_dynamics_gp.cpython-312.pyc\n'}
+[0.821874] (online_gp) StdoutLine: {'line': b'byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/__init__.py to __init__.cpython-312.pyc\n'}
+[0.821950] (online_gp) StdoutLine: {'line': b'byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/svgp_dynamics.py to svgp_dynamics.cpython-312.pyc\n'}
+[0.822584] (obstacles) StdoutLine: {'line': b'byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/train_dynamics_gp.py to train_dynamics_gp.cpython-312.pyc\n'}
+[0.822686] (training) StdoutLine: {'line': b'copying /ros_ws/build/training/build/lib/training/mujoco_model.py -> /ros_ws/install/training/lib/python3.12/site-packages/training\n'}
+[0.822942] (training) StdoutLine: {'line': b'copying /ros_ws/build/training/build/lib/training/collect_data.py -> /ros_ws/install/training/lib/python3.12/site-packages/training\n'}
+[0.823180] (training) StdoutLine: {'line': b'byte-compiling /ros_ws/install/training/lib/python3.12/site-packages/training/mujoco_model.py to mujoco_model.cpython-312.pyc\n'}
+[0.823497] (obstacles) StdoutLine: {'line': b'byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/gp_dynamics.py to gp_dynamics.cpython-312.pyc\n'}
+[0.823636] (online_gp) StdoutLine: {'line': b'byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/al_mppi_controller_node.py to al_mppi_controller_node.cpython-312.pyc\n'}
+[0.824362] (obstacles) StdoutLine: {'line': b'byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/train_dynamics_svgp.py to train_dynamics_svgp.cpython-312.pyc\n'}
+[0.824398] (training) StdoutLine: {'line': b'byte-compiling /ros_ws/install/training/lib/python3.12/site-packages/training/collect_data.py to collect_data.cpython-312.pyc\n'}
+[0.824568] (control) StdoutLine: {'line': b"removing '/ros_ws/install/control/lib/python3.12/site-packages/control-0.0.0-py3.12.egg-info' (and everything under it)\n"}
+[0.824612] (control) StdoutLine: {'line': b'Copying ../../build/control/control.egg-info to /ros_ws/install/control/lib/python3.12/site-packages/control-0.0.0-py3.12.egg-info\n'}
+[0.825185] (obstacles) StdoutLine: {'line': b'byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/eval_gp_models.py to eval_gp_models.cpython-312.pyc\n'}
+[0.825247] (control) StdoutLine: {'line': b'running install_scripts\n'}
+[0.825521] (training) StdoutLine: {'line': b'running install_data\n'}
+[0.825556] (training) StdoutLine: {'line': b'running install_egg_info\n'}
+[0.826185] (obstacles) StdoutLine: {'line': b'byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/__init__.py to __init__.cpython-312.pyc\n'}
+[0.826298] (obstacles) StdoutLine: {'line': b'byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/svgp_dynamics.py to svgp_dynamics.cpython-312.pyc\n'}
+[0.826674] (online_gp) StdoutLine: {'line': b'running install_data\n'}
+[0.826718] (online_gp) StdoutLine: {'line': b'creating /ros_ws/install/online_gp/share/ament_index\n'}
+[0.826753] (online_gp) StdoutLine: {'line': b'creating /ros_ws/install/online_gp/share/ament_index/resource_index\n'}
+[0.826797] (online_gp) StdoutLine: {'line': b'creating /ros_ws/install/online_gp/share/ament_index/resource_index/packages\n'}
+[0.826828] (online_gp) StdoutLine: {'line': b'copying resource/online_gp -> /ros_ws/install/online_gp/share/ament_index/resource_index/packages\n'}
+[0.826859] (online_gp) StdoutLine: {'line': b'copying package.xml -> /ros_ws/install/online_gp/share/online_gp\n'}
+[0.826889] (online_gp) StdoutLine: {'line': b'running install_egg_info\n'}
+[0.827887] (obstacles) StdoutLine: {'line': b'byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/al_mppi_controller_node.py to al_mppi_controller_node.cpython-312.pyc\n'}
+[0.830789] (obstacles) StdoutLine: {'line': b'running install_data\n'}
+[0.830931] (obstacles) StdoutLine: {'line': b'creating /ros_ws/install/obstacles/share/ament_index\n'}
+[0.830992] (obstacles) StdoutLine: {'line': b'creating /ros_ws/install/obstacles/share/ament_index/resource_index\n'}
+[0.831029] (obstacles) StdoutLine: {'line': b'creating /ros_ws/install/obstacles/share/ament_index/resource_index/packages\n'}
+[0.831061] (obstacles) StdoutLine: {'line': b'copying resource/obstacles -> /ros_ws/install/obstacles/share/ament_index/resource_index/packages\n'}
+[0.831093] (obstacles) StdoutLine: {'line': b'copying package.xml -> /ros_ws/install/obstacles/share/obstacles\n'}
+[0.831123] (obstacles) StdoutLine: {'line': b'running install_egg_info\n'}
+[0.832493] (training) StdoutLine: {'line': b"removing '/ros_ws/install/training/lib/python3.12/site-packages/training-0.0.0-py3.12.egg-info' (and everything under it)\n"}
+[0.832630] (training) StdoutLine: {'line': b'Copying ../../build/training/training.egg-info to /ros_ws/install/training/lib/python3.12/site-packages/training-0.0.0-py3.12.egg-info\n'}
+[0.833252] (training) StdoutLine: {'line': b'running install_scripts\n'}
+[0.833958] (online_gp) StdoutLine: {'line': b'Copying ../../build/online_gp/online_gp.egg-info to /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp-0.0.0-py3.12.egg-info\n'}
+[0.834247] (online_gp) StdoutLine: {'line': b'running install_scripts\n'}
+[0.838289] (obstacles) StdoutLine: {'line': b'Copying ../../build/obstacles/obstacles.egg-info to /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles-0.0.0-py3.12.egg-info\n'}
+[0.838571] (obstacles) StdoutLine: {'line': b'running install_scripts\n'}
+[0.873752] (control) StdoutLine: {'line': b"writing list of installed files to '/ros_ws/build/control/install.log'\n"}
+[0.881008] (training) StdoutLine: {'line': b"writing list of installed files to '/ros_ws/build/training/install.log'\n"}
+[0.881201] (online_gp) StdoutLine: {'line': b"writing list of installed files to '/ros_ws/build/online_gp/install.log'\n"}
+[0.886293] (obstacles) StdoutLine: {'line': b"writing list of installed files to '/ros_ws/build/obstacles/install.log'\n"}
+[0.887120] (control) CommandEnded: {'returncode': 0}
+[0.895395] (control) JobEnded: {'identifier': 'control', 'rc': 0}
+[0.896535] (online_gp) CommandEnded: {'returncode': 0}
+[0.898957] (online_gp) JobEnded: {'identifier': 'online_gp', 'rc': 0}
+[0.899194] (training) CommandEnded: {'returncode': 0}
+[0.901320] (training) JobEnded: {'identifier': 'training', 'rc': 0}
+[0.901714] (obstacles) CommandEnded: {'returncode': 0}
+[0.902155] (-) TimerEvent: {}
+[0.903922] (obstacles) JobEnded: {'identifier': 'obstacles', 'rc': 0}
+[0.904257] (-) EventReactorShutdown: {}
