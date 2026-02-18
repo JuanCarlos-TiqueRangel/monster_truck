@@ -1,0 +1,67 @@
+[0.674s] Invoking command in '/ros_ws/src/obstacles': PYTHONPATH=/ros_ws/build/obstacles/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/install/obstacles/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/obstacles build --build-base /ros_ws/build/obstacles/build install --record /ros_ws/build/obstacles/install.log --single-version-externally-managed install_data
+[0.781s] running egg_info
+[0.781s] creating ../../build/obstacles/obstacles.egg-info
+[0.788s] writing ../../build/obstacles/obstacles.egg-info/PKG-INFO
+[0.788s] writing dependency_links to ../../build/obstacles/obstacles.egg-info/dependency_links.txt
+[0.788s] writing requirements to ../../build/obstacles/obstacles.egg-info/requires.txt
+[0.788s] writing top-level names to ../../build/obstacles/obstacles.egg-info/top_level.txt
+[0.788s] writing manifest file '../../build/obstacles/obstacles.egg-info/SOURCES.txt'
+[0.800s] reading manifest file '../../build/obstacles/obstacles.egg-info/SOURCES.txt'
+[0.801s] writing manifest file '../../build/obstacles/obstacles.egg-info/SOURCES.txt'
+[0.801s] running build
+[0.801s] running build_py
+[0.801s] creating /ros_ws/build/obstacles/build
+[0.801s] creating /ros_ws/build/obstacles/build/lib
+[0.801s] creating /ros_ws/build/obstacles/build/lib/obstacles
+[0.801s] copying obstacles/collect_data.py -> /ros_ws/build/obstacles/build/lib/obstacles
+[0.801s] copying obstacles/manual_car.py -> /ros_ws/build/obstacles/build/lib/obstacles
+[0.801s] copying obstacles/__init__.py -> /ros_ws/build/obstacles/build/lib/obstacles
+[0.801s] copying obstacles/manual_data_collection.py -> /ros_ws/build/obstacles/build/lib/obstacles
+[0.801s] copying obstacles/al_mppi_controller_node.py -> /ros_ws/build/obstacles/build/lib/obstacles
+[0.801s] creating /ros_ws/build/obstacles/build/lib/obstacles/gp
+[0.801s] copying obstacles/gp/re_train_dynamics_gp.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp
+[0.801s] copying obstacles/gp/train_dynamics_gp.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp
+[0.802s] copying obstacles/gp/gp_dynamics.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp
+[0.802s] copying obstacles/gp/train_dynamics_svgp.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp
+[0.802s] copying obstacles/gp/eval_gp_models.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp
+[0.802s] copying obstacles/gp/__init__.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp
+[0.802s] copying obstacles/gp/svgp_dynamics.py -> /ros_ws/build/obstacles/build/lib/obstacles/gp
+[0.802s] running install
+[0.804s] running install_lib
+[0.811s] creating /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles
+[0.811s] copying /ros_ws/build/obstacles/build/lib/obstacles/collect_data.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles
+[0.811s] copying /ros_ws/build/obstacles/build/lib/obstacles/manual_car.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles
+[0.812s] copying /ros_ws/build/obstacles/build/lib/obstacles/__init__.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles
+[0.812s] copying /ros_ws/build/obstacles/build/lib/obstacles/manual_data_collection.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles
+[0.812s] creating /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+[0.812s] copying /ros_ws/build/obstacles/build/lib/obstacles/gp/re_train_dynamics_gp.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+[0.812s] copying /ros_ws/build/obstacles/build/lib/obstacles/gp/train_dynamics_gp.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+[0.813s] copying /ros_ws/build/obstacles/build/lib/obstacles/gp/gp_dynamics.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+[0.813s] copying /ros_ws/build/obstacles/build/lib/obstacles/gp/train_dynamics_svgp.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+[0.813s] copying /ros_ws/build/obstacles/build/lib/obstacles/gp/eval_gp_models.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+[0.813s] copying /ros_ws/build/obstacles/build/lib/obstacles/gp/__init__.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+[0.813s] copying /ros_ws/build/obstacles/build/lib/obstacles/gp/svgp_dynamics.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp
+[0.813s] copying /ros_ws/build/obstacles/build/lib/obstacles/al_mppi_controller_node.py -> /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles
+[0.813s] byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/collect_data.py to collect_data.cpython-312.pyc
+[0.813s] byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/manual_car.py to manual_car.cpython-312.pyc
+[0.814s] byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/__init__.py to __init__.cpython-312.pyc
+[0.814s] byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/manual_data_collection.py to manual_data_collection.cpython-312.pyc
+[0.815s] byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/re_train_dynamics_gp.py to re_train_dynamics_gp.cpython-312.pyc
+[0.816s] byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/train_dynamics_gp.py to train_dynamics_gp.cpython-312.pyc
+[0.816s] byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/gp_dynamics.py to gp_dynamics.cpython-312.pyc
+[0.817s] byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/train_dynamics_svgp.py to train_dynamics_svgp.cpython-312.pyc
+[0.818s] byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/eval_gp_models.py to eval_gp_models.cpython-312.pyc
+[0.819s] byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/__init__.py to __init__.cpython-312.pyc
+[0.819s] byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/gp/svgp_dynamics.py to svgp_dynamics.cpython-312.pyc
+[0.821s] byte-compiling /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles/al_mppi_controller_node.py to al_mppi_controller_node.cpython-312.pyc
+[0.824s] running install_data
+[0.824s] creating /ros_ws/install/obstacles/share/ament_index
+[0.824s] creating /ros_ws/install/obstacles/share/ament_index/resource_index
+[0.824s] creating /ros_ws/install/obstacles/share/ament_index/resource_index/packages
+[0.824s] copying resource/obstacles -> /ros_ws/install/obstacles/share/ament_index/resource_index/packages
+[0.824s] copying package.xml -> /ros_ws/install/obstacles/share/obstacles
+[0.824s] running install_egg_info
+[0.831s] Copying ../../build/obstacles/obstacles.egg-info to /ros_ws/install/obstacles/lib/python3.12/site-packages/obstacles-0.0.0-py3.12.egg-info
+[0.832s] running install_scripts
+[0.879s] writing list of installed files to '/ros_ws/build/obstacles/install.log'
+[0.895s] Invoked command in '/ros_ws/src/obstacles' returned '0': PYTHONPATH=/ros_ws/build/obstacles/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/ros_ws/install/obstacles/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/obstacles build --build-base /ros_ws/build/obstacles/build install --record /ros_ws/build/obstacles/install.log --single-version-externally-managed install_data

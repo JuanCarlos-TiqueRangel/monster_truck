@@ -36,11 +36,11 @@ docker run -it \
   --runtime=nvidia \
   --name "${CONTAINER_NAME}" \
   --network host \
+  --privileged \
+  -v /dev:/dev \
   -v "${PROJECT_ROOT}:/ros_ws" \
   -v /tmp/.X11-unix:/tmp/.X11-unix:ro \
   -e DISPLAY="${DISPLAY}" \
   -w /ros_ws/src \
   "${IMAGE_NAME}" \
   bash
-
-

@@ -1,0 +1,65 @@
+running egg_info
+creating ../../build/online_gp/online_gp.egg-info
+writing ../../build/online_gp/online_gp.egg-info/PKG-INFO
+writing dependency_links to ../../build/online_gp/online_gp.egg-info/dependency_links.txt
+writing requirements to ../../build/online_gp/online_gp.egg-info/requires.txt
+writing top-level names to ../../build/online_gp/online_gp.egg-info/top_level.txt
+writing manifest file '../../build/online_gp/online_gp.egg-info/SOURCES.txt'
+reading manifest file '../../build/online_gp/online_gp.egg-info/SOURCES.txt'
+writing manifest file '../../build/online_gp/online_gp.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /ros_ws/build/online_gp/build
+creating /ros_ws/build/online_gp/build/lib
+creating /ros_ws/build/online_gp/build/lib/online_gp
+copying online_gp/collect_data.py -> /ros_ws/build/online_gp/build/lib/online_gp
+copying online_gp/manual_car.py -> /ros_ws/build/online_gp/build/lib/online_gp
+copying online_gp/__init__.py -> /ros_ws/build/online_gp/build/lib/online_gp
+copying online_gp/manual_data_collection.py -> /ros_ws/build/online_gp/build/lib/online_gp
+copying online_gp/al_mppi_controller_node.py -> /ros_ws/build/online_gp/build/lib/online_gp
+creating /ros_ws/build/online_gp/build/lib/online_gp/gp
+copying online_gp/gp/re_train_dynamics_gp.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp
+copying online_gp/gp/train_dynamics_gp.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp
+copying online_gp/gp/gp_dynamics.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp
+copying online_gp/gp/train_dynamics_svgp.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp
+copying online_gp/gp/eval_gp_models.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp
+copying online_gp/gp/__init__.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp
+copying online_gp/gp/svgp_dynamics.py -> /ros_ws/build/online_gp/build/lib/online_gp/gp
+running install
+running install_lib
+creating /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp
+copying /ros_ws/build/online_gp/build/lib/online_gp/collect_data.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp
+copying /ros_ws/build/online_gp/build/lib/online_gp/manual_car.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp
+copying /ros_ws/build/online_gp/build/lib/online_gp/__init__.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp
+copying /ros_ws/build/online_gp/build/lib/online_gp/manual_data_collection.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp
+creating /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+copying /ros_ws/build/online_gp/build/lib/online_gp/gp/re_train_dynamics_gp.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+copying /ros_ws/build/online_gp/build/lib/online_gp/gp/train_dynamics_gp.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+copying /ros_ws/build/online_gp/build/lib/online_gp/gp/gp_dynamics.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+copying /ros_ws/build/online_gp/build/lib/online_gp/gp/train_dynamics_svgp.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+copying /ros_ws/build/online_gp/build/lib/online_gp/gp/eval_gp_models.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+copying /ros_ws/build/online_gp/build/lib/online_gp/gp/__init__.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+copying /ros_ws/build/online_gp/build/lib/online_gp/gp/svgp_dynamics.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp
+copying /ros_ws/build/online_gp/build/lib/online_gp/al_mppi_controller_node.py -> /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp
+byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/collect_data.py to collect_data.cpython-312.pyc
+byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/manual_car.py to manual_car.cpython-312.pyc
+byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/__init__.py to __init__.cpython-312.pyc
+byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/manual_data_collection.py to manual_data_collection.cpython-312.pyc
+byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/re_train_dynamics_gp.py to re_train_dynamics_gp.cpython-312.pyc
+byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/train_dynamics_gp.py to train_dynamics_gp.cpython-312.pyc
+byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/gp_dynamics.py to gp_dynamics.cpython-312.pyc
+byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/train_dynamics_svgp.py to train_dynamics_svgp.cpython-312.pyc
+byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/eval_gp_models.py to eval_gp_models.cpython-312.pyc
+byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/__init__.py to __init__.cpython-312.pyc
+byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/gp/svgp_dynamics.py to svgp_dynamics.cpython-312.pyc
+byte-compiling /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp/al_mppi_controller_node.py to al_mppi_controller_node.cpython-312.pyc
+running install_data
+creating /ros_ws/install/online_gp/share/ament_index
+creating /ros_ws/install/online_gp/share/ament_index/resource_index
+creating /ros_ws/install/online_gp/share/ament_index/resource_index/packages
+copying resource/online_gp -> /ros_ws/install/online_gp/share/ament_index/resource_index/packages
+copying package.xml -> /ros_ws/install/online_gp/share/online_gp
+running install_egg_info
+Copying ../../build/online_gp/online_gp.egg-info to /ros_ws/install/online_gp/lib/python3.12/site-packages/online_gp-0.0.0-py3.12.egg-info
+running install_scripts
+writing list of installed files to '/ros_ws/build/online_gp/install.log'

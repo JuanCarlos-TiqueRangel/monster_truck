@@ -1,0 +1,6 @@
+source;share/online_gp/hook/pythonpath.ps1
+source;share/online_gp/hook/pythonpath.dsv
+source;share/online_gp/hook/pythonpath.sh
+source;share/online_gp/hook/ament_prefix_path.ps1
+source;share/online_gp/hook/ament_prefix_path.dsv
+source;share/online_gp/hook/ament_prefix_path.sh

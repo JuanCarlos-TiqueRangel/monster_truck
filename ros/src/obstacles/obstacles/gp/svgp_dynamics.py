@@ -55,6 +55,45 @@ class SVGPModel(gpytorch.models.ApproximateGP):
 
 _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def kcenter_greedy_torch(X: torch.Tensor, M: int, seed: int | None = None) -> torch.Tensor:
+    """
+    Greedy k-center / farthest-point sampling in Euclidean distance.
+    Runs fully in torch (CPU or GPU), no numpy copies.
+
+    Args:
+      X: (N, D) torch tensor
+      M: number of points
+      seed: optional seed for the first center
+
+    Returns:
+      idx: (M,) long indices into X
+    """
+    N = X.size(0)
+    if M >= N:
+        return torch.arange(N, device=X.device, dtype=torch.long)
+
+    # seed only affects the first selected point
+    if seed is None:
+        first = torch.randint(0, N, (1,), device=X.device).item()
+    else:
+        g = torch.Generator(device=X.device)
+        g.manual_seed(int(seed))
+        first = torch.randint(0, N, (1,), generator=g, device=X.device).item()
+
+    idx = torch.empty(M, dtype=torch.long, device=X.device)
+    idx[0] = first
+
+    # squared distance to nearest chosen center so far
+    d2 = torch.sum((X - X[first:first+1]) ** 2, dim=1)
+
+    for m in range(1, M):
+        i = torch.argmax(d2).item()
+        idx[m] = i
+        di2 = torch.sum((X - X[i:i+1]) ** 2, dim=1)
+        d2 = torch.minimum(d2, di2)
+
+    return idx
+
 
 class SVGPManager:
     def __init__(
@@ -292,7 +331,10 @@ class SVGPManager:
     def _choose_inducing_points(self, Xn: torch.Tensor) -> torch.Tensor:
         N = Xn.size(0)
         M = min(int(self.num_inducing), N)
-        idx = torch.randperm(N, device=self.device)[:M]
+        #idx = torch.randperm(N, device=self.device)[:M]
+
+        # k-center inducing init (instead of random subset)
+        idx = kcenter_greedy_torch(Xn, M, seed=0)  # change seed if you want
         return Xn[idx].contiguous()
 
     def _init_model_optimizer_elbo(self) -> None:

@@ -20,11 +20,13 @@ RUN python3 -m pip install \
         gpytorch \
         matplotlib \
         ipympl \
-        ipywidgets && \
+        ipywidgets \
+        pyserial \
+        pymavlink && \
     python3 -m pip install \
         torch torchvision \
         --index-url https://download.pytorch.org/whl/cu128 && \
-    python3 -m pip install mujoco
+    python3 -m pip install mujoco 
 
 # --- ROS env + workspace ---
 WORKDIR /ros_ws
