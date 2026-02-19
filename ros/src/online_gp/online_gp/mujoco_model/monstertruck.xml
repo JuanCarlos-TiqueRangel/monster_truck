@@ -30,7 +30,7 @@
 
     <geom name="obs_box_1" type="box" 
     pos="2.0 0.0 0.05" 
-    size="0.30 0.30 0.05" 
+    size="0.30 0.30 0.1" 
     rgba="0.2 0.2 0.8 1"/>
 
     <geom name="pole_1" type="cylinder" 

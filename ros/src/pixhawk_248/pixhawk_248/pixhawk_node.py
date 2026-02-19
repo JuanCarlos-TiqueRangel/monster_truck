@@ -61,7 +61,7 @@ class MavlinkCarBridge(Node):
         # Topics / frame
         self.declare_parameter("imu_topic", "imu/data")
         self.declare_parameter("rpy_topic", "imu/rpy")
-        self.declare_parameter("cmd_vel_topic", "cmd_vel")
+        self.declare_parameter("cmd_vel_topic", "cmd_real")
         self.declare_parameter("frame_id", "imu_link")
 
         # cmd_vel -> actuator mapping
