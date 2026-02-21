@@ -45,7 +45,7 @@ if __name__ == "__main__":
     while is_running:
         if robot_id in positions:
             # last position
-            # print('Last position', positions[robot_id], ' rotation RPY', rotations_rpy[robot_id], ' rotation_q',rortations_q)
-            print("rotation_q", rortations_q[robot_id])
+            # print('Last position', positions[robot_id], ' rotation RPY', rotations_rpy[robot_id], ' rotation_q', rortations_q[robot_id])
+            print("rotation_q", rotations_rpy[robot_id])
 
         time.sleep(.1)

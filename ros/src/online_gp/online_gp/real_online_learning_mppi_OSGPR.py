@@ -3,12 +3,11 @@ import math
 from dataclasses import dataclass
 from typing import Optional
 
-import time
 import traceback
-import os
 import threading
 import sys
 import select
+import time
 
 from pathlib import Path
 
@@ -22,6 +21,9 @@ from std_msgs.msg import Float32
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import PoseStamped, Twist, Vector3
 from nav_msgs.msg import Odometry
+
+from queue import SimpleQueue, Empty
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -38,91 +40,7 @@ from utils.dataset_buffer import DatasetBuffer
 from utils.osgpr_retrain_manager import OSGPRTrainableZRetrainManager
 from utils.live_plot import LivePlotter
 from utils.episode_metrics import EpisodeMetricsWriter
-
-
-# ============================================================
-# Simple terminal key listener (no extra deps)
-#   - POSIX: single-key without Enter (raw mode)
-#   - Fallback: line-based (press Enter)
-# ============================================================
-import sys
-import select
-import threading
-
-class KeyListener(threading.Thread):
-    def __init__(self, on_key, logger=None, use_raw=True):
-        super().__init__(daemon=False)   # IMPORTANT: not daemon
-        self.on_key = on_key
-        self.logger = logger
-        self.use_raw = use_raw
-
-        self._stop_event = threading.Event()
-
-        # raw-mode bookkeeping
-        self._fd = None
-        self._old_termios = None
-        self._raw_enabled = False
-
-    def stop(self):
-        self._stop_event.set()
-        # Try to restore immediately from the main thread too
-        self._restore_terminal()
-
-    def _restore_terminal(self):
-        if not self._raw_enabled:
-            return
-        try:
-            import termios
-            if self._fd is not None and self._old_termios is not None:
-                termios.tcsetattr(self._fd, termios.TCSADRAIN, self._old_termios)
-        except Exception:
-            pass
-        finally:
-            self._raw_enabled = False
-
-    def run(self):
-        if not self.use_raw:
-            return self._run_fallback_line_input()
-
-        try:
-            import termios
-            import tty
-
-            self._fd = sys.stdin.fileno()
-            self._old_termios = termios.tcgetattr(self._fd)
-
-            tty.setcbreak(self._fd)
-            self._raw_enabled = True
-
-            if self.logger:
-                self.logger.info("Keyboard: cbreak mode enabled (press keys without Enter).")
-
-            while not self._stop_event.is_set():
-                r, _, _ = select.select([sys.stdin], [], [], 0.1)
-                if r:
-                    ch = sys.stdin.read(1)
-                    if ch:
-                        self.on_key(ch)
-
-        except Exception:
-            # If raw mode fails, fallback to line input
-            if self.logger:
-                self.logger.warn("Keyboard: raw mode not available; use 's'+Enter, 'x'+Enter, etc.")
-            self._run_fallback_line_input()
-
-        finally:
-            self._restore_terminal()
-
-    def _run_fallback_line_input(self):
-        while not self._stop_event.is_set():
-            line = sys.stdin.readline()
-            if not line:
-                break
-            ch = line.strip()[:1]
-            if ch:
-                self.on_key(ch)
-
-
+from utils.key_listener import KeyListener
 
 # ============================================================
 # Config
@@ -137,7 +55,7 @@ class MPPIConfig:
 
     # Timing
     ctrl_dt: float = 0.1
-    horizon: int = 20
+    horizon: int = 30
     num_rollouts: int = 2000
 
     # MPPI hyper-parameters
@@ -145,20 +63,29 @@ class MPPIConfig:
     sigma: float = 1.6
 
     # Action bounds
-    u_min: float = -1.0
-    u_max: float = 1.0
+    # u_min: float = -1.0
+    # u_max: float = 1.0
+
+    u_min: float = -0.2
+    u_max: float = 0.2
 
     # Target / stop conditions
-    pitch_target: float = 1.39
-    flip_stop_abs: float = 2.2
+    pitch_target: float = 1.3
+    flip_stop_abs: float = 1.6
 
     # Goal definition:
     # - sim: absolute x >= goal_x (like before)
     # - real: relative distance since episode start >= goal_x (prevents instant re-goal)
-    if run_mode == "sim":
-        goal_x: float = 5.0
-    if run_mode == "real":
-        goal_x = 2.5
+    goal_x: float = 0.0  # placeholder, set in __post_init__
+
+    def __post_init__(self):
+        rm = str(self.run_mode).strip().lower()
+        if rm == "sim":
+            self.goal_x = 5.0
+        elif rm == "real":
+            self.goal_x = 2.5
+        else:
+            raise ValueError(f"Unknown run_mode: {self.run_mode}")
 
     # Paths to trained SVGP models
     gp_flip_path: str = str(GP_DIR / "models" / "svgp_dynamics_flip_d_dt.pt")
@@ -171,9 +98,9 @@ class MPPIConfig:
     max_log_points: int = 200_000
 
     # ---- retrain/update ----
-    min_points_to_train: int = 20
+    min_points_to_train: int = 5
     max_points_for_train: int = 50_000
-    min_new_points_between_trains: int = 20
+    min_new_points_between_trains: int = 5
     retrain_every_episodes: int = 1
     svgp_warm_steps: int = 200
 
@@ -237,8 +164,9 @@ class MPPICarControllerNode(Node):
         super().__init__("mppi_car_controller")
         self.cfg = cfg
 
-        self.is_sim = (str(cfg.run_mode).strip().lower() == "sim")
-        self.is_real = not self.is_sim
+        self.run_mode = str(cfg.run_mode).strip().lower()
+        self.is_sim = (self.run_mode == "sim")
+        self.is_real = (self.run_mode == "real")
 
         # ----- Device -----
         self.device = torch.device("cuda")
@@ -266,21 +194,17 @@ class MPPICarControllerNode(Node):
 
         # ----- ROS interfaces -----
 
-        if self.cfg.run_mode == "real":
+        if self.is_real:
             self.car_sub = self.create_subscription(Odometry, "/optitrack/odom", self.car_callback, 10)
             self.imu_sub = self.create_subscription(Imu, "/imu/data", self.imu_cb, 10)
-            self.imu_rpy_sub = self.create_subscription(Vector3, "imu/rpy", self.imu_rpy_cb, 10)
+            self.imu_rpy_sub = self.create_subscription(Vector3, "/imu/rpy", self.imu_rpy_cb, 10)
             self.real_cmd_pub = self.create_publisher(Twist, "/cmd_real", 10)
-        if self.cfg.run_mode == "sim":
+        if self.is_sim:
             self.car_sub = self.create_subscription(Odometry, "/car_odom", self.car_callback, 10)
             self.imu_sub = self.create_subscription(Imu, "/car_imu", self.imu_cb, 10)
             self.cmd_pub = self.create_publisher(Float32, "/cmd_action", 10)
 
-        #self.cmd_pub = self.create_publisher(Float32, "/cmd_action", 10)
-        #self.real_cmd_pub = self.create_publisher(Twist, "/cmd_action", 10)
-        #self.imu_sub = self.create_subscription(Imu, "/car_imu", self.imu_cb, 10)
         self.obs_sub = self.create_subscription(PoseStamped, "/obstacle_pose", self.obs_callback, 10)
-        #self.car_sub = self.create_subscription(Odometry, "/car_odom", self.car_callback, 10)
 
         # Reset service (SIM only)
         self.reset_client = None
@@ -297,9 +221,12 @@ class MPPICarControllerNode(Node):
         self.last_flip_rel: float = 0.0
         self.last_rate: float = 0.0
         self.last_state_valid: bool = False
+        self.rpy_valid: bool = False
         self.roll = 0.0
         self.pitch = 0.0
         self.yaw = 0.0
+        self.car_pitch_aspeed: float = 0.0
+
 
         # For computing flip_rel from quaternion
         self.prev_theta: Optional[float] = None
@@ -317,6 +244,8 @@ class MPPICarControllerNode(Node):
         self.ep_cost_steps = 0
         self.episode_start_time = None
         self.episode_started = False
+
+        self.last_rpy_time = 0.0
 
         # Timer
         self.timer = self.create_timer(self.cfg.ctrl_dt, self.control_timer_cb)
@@ -367,14 +296,28 @@ class MPPICarControllerNode(Node):
 
         self.log_cost_j = 0.0
 
-        # Keyboard help + listener
+        # Keyboard help + listener (THREAD-SAFE)
         self._print_key_help()
-        self.key_listener = KeyListener(self._on_key, logger=self.get_logger())
+
+        self._key_q = SimpleQueue()
+
+        # Keyboard thread: ONLY enqueue keys (never call _on_key here)
+        self.key_listener = KeyListener(lambda ch: self._key_q.put(ch), logger=self.get_logger())
         self.key_listener.start()
+
+        # Main thread: process keys safely (Tk/matplotlib is OK here)
+        self.key_timer = self.create_timer(0.05, self._process_keys_mainthread)
+
 
         # If real: keep stopped until manual start
         if self.is_real:
             self.publish_u(0.0)
+
+        self.retrain_started_count = 0
+        self.model_reload_count = 0
+        self.last_reload_stats = None  # optional: file mtimes/sizes
+
+
 
     # ========================================================
     # Keyboard handling
@@ -426,6 +369,16 @@ class MPPICarControllerNode(Node):
 
         self.get_logger().info(f"[REAL] Episode {self.episode_id} pending start. Waiting for valid IMU+odom...")
 
+
+    def _process_keys_mainthread(self):
+        while True:
+            try:
+                ch = self._key_q.get_nowait()
+            except Empty:
+                break
+            self._on_key(ch)   # runs on ROS/main thread now
+
+
     # ========================================================
     # Helpers
     # ========================================================
@@ -458,12 +411,12 @@ class MPPICarControllerNode(Node):
         msg = Float32()
         real_msg = Twist()
 
-        if self.cfg.run_mode == "sim":
+        if self.is_sim:
             msg.data = float(u)
             self.cmd_pub.publish(msg)
-        if self.cfg.run_mode == "real":
+        if self.is_real:
             real_msg.linear.x = float(u)
-            real_msg.angular.z = 0.0
+            real_msg.angular.z = 0.1
             self.real_cmd_pub.publish(real_msg)
 
 
@@ -520,6 +473,10 @@ class MPPICarControllerNode(Node):
         self.wheelie_hold_steps = 0
         self.episode_x0 = None
 
+        self.rpy_valid = False
+        self.last_rpy_time = 0.0
+
+
     # ========================================================
     # Episode end behavior (SIM vs REAL)
     # ========================================================
@@ -547,6 +504,10 @@ class MPPICarControllerNode(Node):
             started = self.retrain.maybe_start_retrain_async(self.dataset, episode_id=self.episode_id, force=True)
 
         self._record_episode_metric(retrain_started=started)
+
+        if started:
+            self.retrain_started_count += 1
+            self.get_logger().info(f"Retrain started count: {self.retrain_started_count}")
 
         # Stop episode in real mode (stay idle)
         if self.is_real:
@@ -627,6 +588,12 @@ class MPPICarControllerNode(Node):
         self.roll = msg.x
         self.pitch = msg.y
         self.yaw = msg.z
+        self.rpy_valid = True
+        self.last_rpy_time = time.time()
+        if self.is_real and self.waiting_post_reset:
+            self.waiting_post_reset = False
+
+
 
     def obs_callback(self, msg: PoseStamped):
         self.obs_pos_x = float(msg.pose.position.x)
@@ -697,6 +664,9 @@ class MPPICarControllerNode(Node):
 
             loaded = self.retrain.reload_models_if_ready()
             if loaded is not None:
+                self.model_reload_count += 1
+                self.get_logger().info(f"Model reload count: {self.model_reload_count} (now using updated SVGP models)")
+
                 gp_pose_x, gp_vx, gp_flip, gp_rate = loaded
                 self.gp_pose_x, self.gp_vx, self.gp_flip, self.gp_rate = gp_pose_x, gp_vx, gp_flip, gp_rate
                 self.mppi.set_models(gp_pose_x, gp_vx, gp_flip, gp_rate)
@@ -722,14 +692,17 @@ class MPPICarControllerNode(Node):
         if self.is_real:
             # If user asked to start, wait until sensors are valid, then activate.
             if self.pending_start:
-                # Need IMU + Odom valid and not in alignment gate
-                if (not self.last_state_valid) or (not self.last_odom_valid) or self.waiting_post_reset:
+                rpy_fresh = self.rpy_valid and ((time.time() - self.last_rpy_time) <= 0.30)
+
+                # Need fresh RPY + valid odom
+                if (not rpy_fresh) or (not self.last_odom_valid):
                     self.publish_u(0.0)
                     return
 
                 # Start episode now
                 self.pending_start = False
                 self.episode_active = True
+                self.waiting_post_reset = False   # <-- REAL: do not gate on /imu/data alignment
                 self._mark_episode_started()
                 self.get_logger().info(f"[REAL] Episode {self.episode_id} STARTED. x0={self.episode_x0}")
                 self.mppi.reset_plan()
@@ -739,6 +712,7 @@ class MPPICarControllerNode(Node):
                 self.publish_u(0.0)
                 return
 
+
         # SIM mode: keep previous behavior gates
         if self.is_sim:
             if self.resetting or self.waiting_post_reset:
@@ -746,14 +720,26 @@ class MPPICarControllerNode(Node):
                 self.publish_u(0.0)
                 return
 
-        # Need valid IMU
-        if not self.last_state_valid:
-            if not self.warned_no_imu:
-                self.get_logger().warn("Waiting for first IMU message...")
-                self.warned_no_imu = True
-            self.wheelie_hold_steps = 0
-            self.publish_u(0.0)
-            return
+        # Need valid attitude source
+        if self.is_sim:
+            if not self.last_state_valid:
+                if not self.warned_no_imu:
+                    self.get_logger().warn("Waiting for first IMU message...")
+                    self.warned_no_imu = True
+                self.wheelie_hold_steps = 0
+                self.publish_u(0.0)
+                return
+        else:
+            # REAL: require fresh /imu/rpy
+            rpy_fresh = self.rpy_valid and ((time.time() - self.last_rpy_time) <= 0.30)
+            if not rpy_fresh:
+                if not self.warned_no_imu:
+                    self.get_logger().warn("Waiting for fresh /imu/rpy ...")
+                    self.warned_no_imu = True
+                self.wheelie_hold_steps = 0
+                self.publish_u(0.0)
+                return
+        
         self.warned_no_imu = False
 
         # Need valid odom
@@ -761,12 +747,12 @@ class MPPICarControllerNode(Node):
             self.publish_u(0.0)
             return
 
-        if self.cfg.run_mode == "sim":
+        if self.is_sim:
             flip_rel = float(self.last_flip_rel)
             rate = float(self.last_rate)
-        if self.cfg.run_mode == "real":
+        if self.is_real:
             flip_rel = float(self.pitch)
-            rate = float(self.last_rate)
+            rate = float(self.car_pitch_aspeed)
 
         # Obstacle distance
         if (self.obs_pos_x is None) or (self.car_pos_x is None):
