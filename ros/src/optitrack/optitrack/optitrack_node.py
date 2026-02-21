@@ -9,7 +9,10 @@ import rclpy
 from rclpy.node import Node
 
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Quaternion
+from geometry_msgs.msg import Quaternion, Vector3
+from util import quaternion_to_euler
+
+
 
 # Your existing NatNet client (same one you are already using)
 from NatNetClient import NatNetClient
@@ -19,6 +22,7 @@ from NatNetClient import NatNetClient
 class Sample:
     pos: Tuple[float, float, float]          # (x,y,z)
     quat: Tuple[float, float, float, float]  # (qx,qy,qz,qw)
+    rpy: Tuple[float, float, float]
     t: float                                 # monotonic time (s)
 
 
@@ -124,6 +128,7 @@ class OptiTrackOdometryNode(Node):
 
         # -------- ROS publisher --------
         self.odom_pub = self.create_publisher(Odometry, "optitrack/odom", 10)
+        self.pub_rpy = self.create_publisher(Vector3, "optitrack/rpy", 10)
 
         # -------- Data shared with NatNet thread --------
         self._lock = threading.Lock()
@@ -171,7 +176,10 @@ class OptiTrackOdometryNode(Node):
         )
         q = quat_normalize(q)
 
-        s = Sample(pos=pos, quat=q, t=time.monotonic())
+        roll, pitch, yaw = quaternion_to_euler(rotation_quaternion)
+        rpy = (float(roll), float(pitch), float(yaw))
+
+        s = Sample(pos=pos, quat=q, rpy=rpy, t=time.monotonic())
         with self._lock:
             self._latest = s
 
@@ -243,6 +251,13 @@ class OptiTrackOdometryNode(Node):
         msg.twist.twist.angular.y = w_out[1]
         msg.twist.twist.angular.z = w_out[2]
 
+        # Build Vector Orientation roll, pitch, yaw 
+        rpy = Vector3()
+        roll, pitch, yaw = s.rpy[0], s.rpy[1], s.rpy[2] 
+        rpy.x, rpy.y, rpy.z = roll, pitch, yaw
+
+        # Publish the information
+        self.pub_rpy.publish(rpy)
         self.odom_pub.publish(msg)
 
     def destroy_node(self):
