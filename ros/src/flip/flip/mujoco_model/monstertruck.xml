@@ -1,0 +1,135 @@
+<mujoco model="monster_truck_flip">
+  <option gravity="0 0 -9.81" integrator="RK4" timestep="0.001"/>
+  <compiler angle="radian"/>
+
+  <default>
+    <geom contype="1" conaffinity="1"
+          friction="1.0 0.005 0.0002"
+          solref="0.015 1"
+          solimp="0.95 0.99 0.002"
+          density="1000"/>
+    <joint damping="0.02"/>
+  </default>
+
+  <visual>
+    <quality shadowsize="2048"/>
+    <map znear="0.01" zfar="20"/>
+  </visual>
+
+  <worldbody>
+    <light name="sun" pos="0 0 10" dir="0 0 -1" diffuse="1 1 1"/>
+    <geom name="ground" type="plane" size="100 100 0.1" rgba="1.0 1.0 1.0 1"/>
+
+    <!-- obstacles unchanged -->
+    <!-- <geom name="ramp_1" type="box" 
+    pos="3.5 0.0 0.10" 
+    size="0.80 0.50 0.10" 
+    euler="0 -0.35 0" 
+    rgba="0.8 0.6 0.2 1"/> -->
+    
+
+    <geom name="obs_box_1" type="box" 
+    pos="2.0 0.0 10.05" 
+    size="0.30 0.30 0.1" 
+    rgba="0.2 0.2 0.8 1"/>
+
+    <geom name="pole_1" type="cylinder" 
+      pos="6.0 0.0 10.0" 
+      size="0.10 1.50" 
+      euler="1.5708 0 0" 
+      rgba="0.2 0.7 0.2 1"/>
+
+    <!-- =========================================================
+         FLIPPED START
+         We resized the roof, so the max roof local z is ~0.14 + 0.01 = 0.15.
+         For flipped start (roof on ground), set chassis_z ~= 0.15 (+epsilon).
+         ========================================================= -->
+    <body name="chassis" pos="0 0 0.15" quat="0 1 0 0">
+      <freejoint/>
+
+      <site name="imu_site" pos="0 0 0" size="0.01" rgba="0 1 0 1"/>
+
+      <!-- Base chassis (smaller, matches wheelbase/track better) -->
+      <geom name="chassis_box" type="box" size="0.22 0.09 0.06"
+            rgba="0.6 0.1 0.1 1" mass="3.81"/>
+
+      <!-- =========================================================
+           RESCALED ROOF (matches smaller chassis)
+           Old roof was huge (y half-size 0.25). This one fits the new body.
+           ========================================================= -->
+      <!-- Slab half-sizes: x=0.04 (length 0.08), y=0.11 (width 0.22), z=0.01 -->
+      <geom name="roof_slab_1" type="box" size="0.04 0.11 0.01" pos="-0.18 0 0.090" euler="0 -0.45 0" rgba="0.7 0.2 0.2 1" mass="0.01"/>
+      <geom name="roof_slab_2" type="box" size="0.04 0.11 0.01" pos="-0.12 0 0.110" euler="0 -0.30 0" rgba="0.7 0.2 0.2 1" mass="0.01"/>
+      <geom name="roof_slab_3" type="box" size="0.04 0.11 0.01" pos="-0.06 0 0.130" euler="0 -0.15 0" rgba="0.7 0.2 0.2 1" mass="0.01"/>
+      <geom name="roof_slab_4" type="box" size="0.04 0.11 0.01" pos=" 0.00 0 0.140" euler="0  0.00 0" rgba="0.7 0.2 0.2 1" mass="0.01"/>
+      <geom name="roof_slab_5" type="box" size="0.04 0.11 0.01" pos=" 0.06 0 0.130" euler="0  0.15 0" rgba="0.7 0.2 0.2 1" mass="0.01"/>
+      <geom name="roof_slab_6" type="box" size="0.04 0.11 0.01" pos=" 0.12 0 0.110" euler="0  0.30 0" rgba="0.7 0.2 0.2 1" mass="0.01"/>
+      <geom name="roof_slab_7" type="box" size="0.04 0.11 0.01" pos=" 0.18 0 0.090" euler="0  0.45 0" rgba="0.7 0.2 0.2 1" mass="0.01"/>
+
+      <!-- =========================================================
+           WHEELS (LMT-ish scale)
+           wheelbase: ±0.1905
+           width: overall 0.412 with tire half-width 0.051 -> wheel center y ≈ ±0.155
+           axle drop: -0.08 (so upright would sit right if you ever switch)
+           ========================================================= -->
+      <body name="wheel_fl" pos=" 0.1905  0.155 -0.08">
+        <joint name="j_fl" type="hinge" axis="0 1 0" damping="0.002"/>
+        <geom name="tire_fl" type="cylinder" size="0.081 0.051" euler="1.57 0 0"
+              rgba="0.1 0.1 0.1 1" mass="0.30" friction="1.8 0.005 0.0002"/>
+        <geom name="mark_fl" type="sphere" size="0.02" pos="0.01 0.05 0.04"
+              rgba="1 1 1 1" contype="0" conaffinity="0" density="0"/>
+      </body>
+
+      <body name="wheel_fr" pos=" 0.1905 -0.155 -0.08">
+        <joint name="j_fr" type="hinge" axis="0 1 0" damping="0.002"/>
+        <geom name="tire_fr" type="cylinder" size="0.081 0.051" euler="1.57 0 0"
+              rgba="0.1 0.1 0.1 1" mass="0.30" friction="1.8 0.005 0.0002"/>
+        <geom name="mark_fr" type="sphere" size="0.02" pos="0.01 -0.05 0.04"
+              rgba="1 1 1 1" contype="0" conaffinity="0" density="0"/>
+      </body>
+
+      <body name="wheel_rl" pos="-0.1905  0.155 -0.08">
+        <joint name="j_rl" type="hinge" axis="0 1 0" damping="0.002"/>
+        <geom name="tire_rl" type="cylinder" size="0.081 0.051" euler="1.57 0 0"
+              rgba="0.1 0.1 0.1 1" mass="0.30" friction="1.8 0.005 0.0002"/>
+        <geom name="mark_rl" type="sphere" size="0.02" pos="0.01 0.05 0.04"
+              rgba="1 1 1 1" contype="0" conaffinity="0" density="0"/>
+      </body>
+
+      <body name="wheel_rr" pos="-0.1905 -0.155 -0.08">
+        <joint name="j_rr" type="hinge" axis="0 1 0" damping="0.002"/>
+        <geom name="tire_rr" type="cylinder" size="0.081 0.051" euler="1.57 0 0"
+              rgba="0.1 0.1 0.1 1" mass="0.30" friction="1.8 0.005 0.0002"/>
+        <geom name="mark_rr" type="sphere" size="0.02" pos="0.01 -0.05 0.04"
+              rgba="1 1 1 1" contype="0" conaffinity="0" density="0"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- =========================================================
+       DRIVETRAIN (1 motor) + open-diff-ish torque split
+       Use coef=0.25 so motor torque is split across wheels.
+       Gear multiplied by 4 to keep similar per-wheel torque.
+       ========================================================= -->
+  <tendon>
+    <fixed name="drive">
+      <joint joint="j_fl" coef="0.25"/>
+      <joint joint="j_fr" coef="0.25"/>
+      <joint joint="j_rl" coef="0.25"/>
+      <joint joint="j_rr" coef="0.25"/>
+    </fixed>
+  </tendon>
+
+  <actuator>
+    <motor name="drive_motor" tendon="drive"
+           ctrllimited="true" ctrlrange="-1 1"
+           gear="8.0"/>
+  </actuator>
+
+
+  <sensor>
+    <accelerometer name="imu_acc"  site="imu_site"/>
+    <gyro          name="imu_gyro" site="imu_site"/>
+    <velocimeter   name="imu_vel"  site="imu_site"/>
+  </sensor>
+</mujoco>

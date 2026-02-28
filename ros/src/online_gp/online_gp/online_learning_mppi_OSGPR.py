@@ -46,7 +46,7 @@ from utils.episode_metrics import EpisodeMetricsWriter
 class MPPIConfig:
     # Timing
     ctrl_dt: float = 0.1
-    horizon: int = 20
+    horizon: int = 30
     num_rollouts: int = 2000
 
     # MPPI hyper-parameters
@@ -78,7 +78,7 @@ class MPPIConfig:
 
     # training window cap
     max_points_for_train: int = 50_000
-    min_new_points_between_trains: int = 20
+    min_new_points_between_trains: int = 5
 
     # SVGP warm-update steps per retrain event
     svgp_warm_steps: int = 200
@@ -99,7 +99,7 @@ class MPPIConfig:
     entropy_dt_scale: bool = True
 
     # ---- seed dataset ----
-    seed_npz_path: str = str(DATA_DIR / "mujoco_manual_wheelie.npz")
+    seed_npz_path: str = str(DATA_DIR / "mujoco_manual_run_obs.npz")
     seed_episode_id: int = -1
     keep_seed: bool = True
 
@@ -110,10 +110,10 @@ class MPPIConfig:
     # ---- weights ----
     w_flat: float = 6.0
     w_wheelie: float = 1.5
-    w_u: float = 100.1
-    w_rate: float = 2.0
+    w_u: float = 10.1
+    w_rate: float = 15.0
 
-    pitch_limit: float = 1.45
+    pitch_limit: float = 1.6
     w_pitch_limit: float = 80.0
 
     wheelie_hold_time_sec: float = 0.5
@@ -121,7 +121,7 @@ class MPPIConfig:
     wheelie_rate_tol: float = 1.0
 
     goal_x: float = 5.0
-    w_goal: float = 3.0
+    w_goal: float = 1.0
     w_vx: float = 0.5
     v_des: float = 0.0
 
@@ -130,7 +130,7 @@ class MPPIConfig:
 
     # --- OSGPR-style streaming update (trainable Z) ---
     osgpr_steps: int = 60
-    osgpr_batch_size: int = 2048
+    osgpr_batch_size: int = 256
 
     osgpr_lr_theta: float = 1e-2     # model/likelihood params lr
     osgpr_lr_z: float = 2e-4         # inducing locations lr (SMALL)
@@ -141,6 +141,8 @@ class MPPIConfig:
     osgpr_freeze_hypers: bool = True # start stable; can unfreeze later
 
     live_plot_mode: str = "both"
+
+    backward_reset_dist: float = 3.0   # meters (if car goes this far backward from start -> reset)
 
 
 
@@ -164,6 +166,8 @@ class MPPICarControllerNode(Node):
         self.gp_vx     = SVGPManager.load(self.cfg.gp_vx_path, device=self.device)
         self.gp_flip   = SVGPManager.load(self.cfg.gp_flip_path, device=self.device)
         self.gp_rate   = SVGPManager.load(self.cfg.gp_rate_path, device=self.device)
+
+        self.episode_x_start: Optional[float] = None
 
         # ----- State -----
         self.obs_pos_x: Optional[float] = None
@@ -260,6 +264,7 @@ class MPPICarControllerNode(Node):
         )
 
         self.log_cost_j = 0.0
+        self._prev_x = 0.0
 
     # ========================================================
     # Helpers
@@ -270,6 +275,10 @@ class MPPICarControllerNode(Node):
             self.episode_started = True
             self.ep_cost_sum = 0.0
             self.ep_cost_steps = 0
+
+            # store x reference for backward reset
+            if self.car_pos_x is not None:
+                self.episode_x_start = float(self.car_pos_x)
 
     # ========================================================
     # ROS callbacks
@@ -333,6 +342,7 @@ class MPPICarControllerNode(Node):
     def car_callback(self, msg: Odometry):
         self.car_pos_x = float(msg.pose.pose.position.x)
         self.car_vx = float(msg.twist.twist.linear.x)
+        
         self.last_odom_valid = True
 
 
@@ -419,6 +429,33 @@ class MPPICarControllerNode(Node):
         else:
             d_obs = float(self.obs_pos_x - self.car_pos_x)
 
+        # Backward reset condition (episode-relative)
+        if self.episode_x_start is not None and self.car_pos_x is not None:
+            x_rel = float(self.car_pos_x - self.episode_x_start)
+            if x_rel <= -float(cfg.backward_reset_dist):
+                self.get_logger().warn(
+                    f"Episode {int(self.episode_id)} BACKWARD_RESET: x_rel={x_rel:.2f}m <= -{cfg.backward_reset_dist:.2f}m"
+                )
+
+                ep_num = self.episode_id + 1
+                do_retrain_now = (cfg.retrain_every_episodes > 0) and (ep_num % cfg.retrain_every_episodes == 0)
+
+                started = False
+                if do_retrain_now:
+                    started = self.retrain.maybe_start_retrain_async(self.dataset, episode_id=self.episode_id, force=True)
+
+                self._record_episode_metric(retrain_started=started, success=0)
+
+                self.wheelie_hold_steps = 0
+                self.publish_u(0.0)
+
+                if started:
+                    self.reset_after_retrain = True
+                    return
+
+                self.request_reset(force=True)
+                return
+
         # Episode timeout
         if self.episode_start_time is not None:
             elapsed_ep = (self.get_clock().now() - self.episode_start_time).nanoseconds * 1e-9
@@ -427,9 +464,25 @@ class MPPICarControllerNode(Node):
                     f"Episode {int(self.episode_id)} TIMEOUT after {elapsed_ep:.2f}s "
                     f"(limit={cfg.episode_timeout_sec:.2f}s). Forcing reset."
                 )
-                self._record_episode_metric(retrain_started=True)
+
+                ep_num = self.episode_id + 1
+                do_retrain_now = (cfg.retrain_every_episodes > 0) and (ep_num % cfg.retrain_every_episodes == 0)
+
+                started = False
+                if do_retrain_now:
+                    started = self.retrain.maybe_start_retrain_async(
+                        self.dataset, episode_id=self.episode_id, force=True
+                    )
+
+                self._record_episode_metric(retrain_started=started, success=0)
+
                 self.wheelie_hold_steps = 0
                 self.publish_u(0.0)
+
+                if started:
+                    self.reset_after_retrain = True
+                    return
+
                 self.request_reset(force=True)
                 return
 
@@ -448,7 +501,7 @@ class MPPICarControllerNode(Node):
                     f"Skipping retrain this episode (ep_num={ep_num}). retrain_every_episodes={cfg.retrain_every_episodes}"
                 )
 
-            self._record_episode_metric(retrain_started=started)
+            self._record_episode_metric(retrain_started=started, success=0)
 
             self.wheelie_hold_steps = 0
             if started:
@@ -483,8 +536,8 @@ class MPPICarControllerNode(Node):
             ep_num = self.episode_id + 1
             do_retrain_now = (cfg.retrain_every_episodes > 0) and (ep_num % cfg.retrain_every_episodes == 0)
 
-            started = self.retrain.maybe_start_retrain_async(self.dataset, episode_id=self.episode_id, force=False) if do_retrain_now else False
-            self._record_episode_metric(retrain_started=started)
+            started = self.retrain.maybe_start_retrain_async(self.dataset, episode_id=self.episode_id, force=True) if do_retrain_now else False
+            self._record_episode_metric(retrain_started=started, success=1)
 
             if started:
                 self.reset_after_retrain = True
@@ -546,7 +599,7 @@ class MPPICarControllerNode(Node):
             episode_id=int(self.episode_id),
         )
 
-    def _record_episode_metric(self, retrain_started: bool):
+    def _record_episode_metric(self, retrain_started: bool, success: int):
         if self.episode_start_time is None:
             self.episode_started = False
             return
@@ -561,6 +614,7 @@ class MPPICarControllerNode(Node):
             time_to_goal_sec=float(dt),
             retrain_started=bool(retrain_started),
             cost=float(avg_cost),
+            success=success
         )
 
         self.episode_start_time = None
@@ -571,6 +625,7 @@ class MPPICarControllerNode(Node):
         self.prev_theta_unwrapped = 0.0
         self.theta0 = None
         self.last_state_valid = False
+        self.episode_x_start = None
 
         self.mppi.reset_plan()
 

@@ -50,8 +50,8 @@ class MPPIConfig:
     # ---- RUN MODE ----
     # "sim": uses reset_car service, automatic resets like before
     # "real": no reset service; you manually start episodes with keyboard
-    #run_mode: str = "sim"   # "sim" | "real"
-    run_mode: str = "real"
+    run_mode: str = "sim"   # "sim" | "real"
+    #run_mode: str = "real"
 
     # Timing
     ctrl_dt: float = 0.1
@@ -66,8 +66,8 @@ class MPPIConfig:
     # u_min: float = -1.0
     # u_max: float = 1.0
 
-    u_min: float = -0.2
-    u_max: float = 0.2
+    u_min: float = -1.0
+    u_max: float = 1.0
 
     # Target / stop conditions
     pitch_target: float = 1.3
