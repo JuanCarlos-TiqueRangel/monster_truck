@@ -126,6 +126,7 @@
            gear="8.0"/>
   </actuator>
 
+
   <sensor>
     <accelerometer name="imu_acc"  site="imu_site"/>
     <gyro          name="imu_gyro" site="imu_site"/>
