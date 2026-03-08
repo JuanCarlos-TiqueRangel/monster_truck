@@ -5,8 +5,6 @@ from typing import Optional
 
 import traceback
 import threading
-import sys
-import select
 import time
 
 from pathlib import Path
@@ -55,9 +53,9 @@ class MPPIConfig:
     #run_mode: str = "real"
 
     # Timing
-    ctrl_dt: float = 0.1
+    ctrl_dt: float = 0.02
     horizon: int = 40
-    num_rollouts: int = 2000
+    num_rollouts: int = 256
 
     # MPPI hyper-parameters
     lambda_: float = 1.0
@@ -673,7 +671,8 @@ class MPPICarControllerNode(Node):
 
         self._mark_episode_started()
         self._accumulate_executed_cost(x0, u_cmd)
-        self.publish_u(u_cmd)
+        #self.publish_u(u_cmd)
+        self.publish_u(0.0)
         self._log_step(up_z, up_z_dot, u_cmd)
 
 

@@ -29,7 +29,7 @@ class Config:
     sample_dt: float = 0.1          # [s] logging at 10 Hz (wall-clock)
 
     # Command publish rate (responsive manual control)
-    cmd_pub_hz: float = 50.0        # [Hz] publish /cmd_action at 50 Hz (wall-clock)
+    cmd_pub_hz: float = 10.0        # [Hz] publish /cmd_action at 50 Hz (wall-clock)
 
     # Manual command magnitude
     amplitude: float = 1.0          # W => +amplitude, S => -amplitude
@@ -38,7 +38,7 @@ class Config:
     duration: Optional[float] = None
 
     # Save path
-    save_path: str = "data/mujoco_manual_run.npz"
+    save_path: str = "data/mujoco_manual_run_obs.npz"
 
     # Helps “hold” behavior because OS key-repeat can be slow
     key_hold_sec: float = 0.10
@@ -182,6 +182,8 @@ class MujocoKeyboardCmdLogger(Node):
         self.vz_log = []
         self.vx_log = []
         self.x_log = []
+        self.up_z_log = []
+        self.up_z_dot_log = []
         self.linear_x_log = []
 
         # Timers (IMPORTANT: pass clock=self.wall_clock)
@@ -269,6 +271,29 @@ class MujocoKeyboardCmdLogger(Node):
         else:
             angle_unwrapped = prev_unwrapped + d
         return angle, angle_unwrapped
+    
+
+    def quat_to_R(self, qw, qx, qy, qz):
+        q = np.array([qw,qx,qy,qz], dtype=np.float64)
+        q /= (np.linalg.norm(q) + 1e-12)
+        w,x,y,z = q
+        return np.array([
+            [1-2*(y*y+z*z), 2*(x*y - z*w), 2*(x*z + y*w)],
+            [2*(x*y + z*w), 1-2*(x*x+z*z), 2*(y*z - x*w)],
+            [2*(x*z - y*w), 2*(y*z + x*w), 1-2*(x*x+y*y)]
+        ], dtype=np.float64)
+    
+    
+    def upright_u_udot(self, qw,qx,qy,qz, wx,wy,wz):
+        R = self.quat_to_R(qw,qx,qy,qz)     # body->world
+        e3 = np.array([0.,0.,1.])
+        b3 = R @ e3                    # body z in world
+        u  = float(b3[2])              # uprightness
+
+        w_body  = np.array([wx,wy,wz], dtype=np.float64)
+        w_world = R @ w_body
+        u_dot = float(np.dot(np.cross(e3, b3), w_world))
+        return u, u_dot
 
     # ------------------ ROS callbacks ------------------
 
@@ -284,11 +309,14 @@ class MujocoKeyboardCmdLogger(Node):
         qx = float(msg.orientation.x)
         qy = float(msg.orientation.y)
         qz = float(msg.orientation.z)
+        wx = float(msg.angular_velocity.x)
+        wy = float(msg.angular_velocity.x)
+        wz = float(msg.angular_velocity.x)
 
         R, euler_pitch = self.quat_to_R_and_pitch(qw, qx, qy, qz)
 
-        up_x, up_y, up_z = R[0, 2], R[1, 2], R[2, 2]
-        theta = math.atan2(up_x, up_z)
+        up_x, up_y, _up_z = R[0, 2], R[1, 2], R[2, 2]
+        theta = math.atan2(up_x, _up_z)
 
         self.prev_theta, theta_unwrapped = self.unwrap_angle(
             self.prev_theta, self.prev_theta_unwrapped, theta
@@ -307,8 +335,11 @@ class MujocoKeyboardCmdLogger(Node):
         self.latest_flip_rel = float(flip_rel)
         self.latest_rate = float(pitch_rate)
         self.latest_acc = float(acc_imu)
-        self.latest_up_z = float(up_z)
+        self.latest_up_z = float(_up_z)
         self.latest_up_x = float(up_x)
+
+        self.up_z, self.up_z_dot    = self.upright_u_udot(qw, qx, qy, qz, wx, wy, wz)
+
         self.have_imu = True
 
     def odom_cb(self, msg: Odometry):
@@ -385,6 +416,8 @@ class MujocoKeyboardCmdLogger(Node):
         self.vx_log.append(self.latest_up_x)
         self.x_log.append(self.x_pos)
         self.linear_x_log.append(self.line_speed_x)
+        self.up_z_log.append(self.up_z)
+        self.up_z_dot_log.append(self.up_z_dot)
 
     def save_npz(self):
         if not self.t_wall_log:
@@ -405,6 +438,8 @@ class MujocoKeyboardCmdLogger(Node):
             vx=np.asarray(self.vx_log, dtype=np.float32),
             x_pose=np.asarray(self.x_log, dtype=np.float32),
             linear_speed_x=np.asarray(self.linear_x_log, dtype=np.float32),
+            up_z=np.asarray(self.up_z_log, dtype=np.float32),
+            up_z_dot=np.asarray(self.up_z_dot_log, dtype=np.float32),
         )
         self.get_logger().info(f"Saved data to NPZ: {self.cfg.save_path} (N={len(self.t_wall_log)})")
         print(f"Done. Samples: {len(self.t_wall_log)}  wall time: {self.t_wall_log[-1]:.3f}s")

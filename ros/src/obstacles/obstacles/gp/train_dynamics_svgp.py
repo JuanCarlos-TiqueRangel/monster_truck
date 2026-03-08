@@ -18,7 +18,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import torch
 
-from gp.svgp_dynamics import SVGPManager
+from svgp_dynamics import SVGPManager
 
 
 # -----------------------------
@@ -37,7 +37,7 @@ class TrainSVGPConfig:
     seed: int = 123
 
     kernel: str = "RQ"
-    iters: int = 3000
+    iters: int = 300
     lr: float = 0.01
     batch_size: int = 256
     num_inducing: int = 128
@@ -184,7 +184,7 @@ def train_svgps_from_npz(
     X, Y = maybe_subsample(X_full, Y_full, cfg.N_target, cfg.seed)
 
     N = X.shape[0]
-    if N < 10:
+    if N < 5:
         raise RuntimeError(f"Not enough transitions to train: N_transitions={N}")
 
     num_inducing_eff = int(min(cfg.num_inducing, N))
@@ -237,7 +237,9 @@ def save_svgps(gps: List[SVGPManager], y_names: List[str], out_dir: str, prefix:
 if __name__ == "__main__":
     script_dir = Path(__file__).resolve().parent        # obstacles/gp
     obstacles_dir = script_dir.parent                   # obstacles
-    npz = obstacles_dir / "data" / "mujoco_manual_wheelie.npz"
+
+    # file names mujoco_manual_run_flip, mujoco_manual_wheelie, mujoco_manual_run_svgp, mujoco_manual_run_obs
+    npz = obstacles_dir / "data" / "mujoco_manual_run_obs.npz"
 
     input_  = ["x_pose", "linear_speed_x", "flip", "rate", "u"]
     output_ = ["x_pose", "linear_speed_x", "flip", "rate"]
@@ -254,10 +256,10 @@ if __name__ == "__main__":
         seed=123,
 
         kernel="RQ",
-        iters=3000,
+        iters=300,
         lr=0.01,
         batch_size=256,
-        num_inducing=128,
+        num_inducing=256,
         learn_inducing_locations=True,
         freeze_norm=True,
         device="cuda",

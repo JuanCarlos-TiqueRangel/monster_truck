@@ -16,7 +16,7 @@ from nav_msgs.msg import Odometry
 # ============================================================
 # SIMPLE EXPERIMENT FLAG (change this line only)
 # ============================================================
-START_FLIPPED = True   # True: upside-down at start/reset | False: upright
+START_FLIPPED = False   # True: upside-down at start/reset | False: upright
 
 
 class MujocoImuNode(Node):

@@ -58,41 +58,41 @@ class MPPICore:
 
     # COST FUNCTION FOR OBSTACLED
 
-    # def stage_cost_torch(self, states: torch.Tensor, actions: torch.Tensor, obs_x: torch.Tensor) -> torch.Tensor:
-    #     # states: (K,4) = [x, vx, pitch, rate]
-    #     x     = states[:, 0]
-    #     vx    = states[:, 1]
-    #     pitch = states[:, 2]
-    #     rate  = states[:, 3]
-    #     u     = actions
+    def stage_cost_torch(self, states: torch.Tensor, actions: torch.Tensor, obs_x: torch.Tensor) -> torch.Tensor:
+        # states: (K,4) = [x, vx, pitch, rate]
+        x     = states[:, 0]
+        vx    = states[:, 1]
+        pitch = states[:, 2]
+        rate  = states[:, 3]
+        u     = actions
 
-    #     # ----------------------------
-    #     # 1) progress: push x forward until goal_x
-    #     # (use relu so no penalty after crossing)
-    #     # ----------------------------
-    #     goal_x = float(self.cfg.goal_x)
-    #     dist_to_goal = torch.relu(goal_x - x)
-    #     cost_progress = float(self.cfg.w_goal) * (dist_to_goal ** 2)
+        # ----------------------------
+        # 1) progress: push x forward until goal_x
+        # (use relu so no penalty after crossing)
+        # ----------------------------
+        goal_x = float(self.cfg.goal_x)
+        dist_to_goal = torch.relu(goal_x - x)
+        cost_progress = float(self.cfg.w_goal) * (dist_to_goal ** 2)
 
-    #     # ----------------------------
-    #     # 2) safety: pitch limit (prevents flips)
-    #     # ----------------------------
-    #     pitch_lim = float(self.cfg.pitch_limit)
-    #     cost_pitch_lim = float(self.cfg.w_pitch_limit) * torch.relu(torch.abs(pitch) - pitch_lim) ** 2
+        # ----------------------------
+        # 2) safety: pitch limit (prevents flips)
+        # ----------------------------
+        pitch_lim = float(self.cfg.pitch_limit)
+        cost_pitch_lim = float(self.cfg.w_pitch_limit) * torch.relu(torch.abs(pitch) - pitch_lim) ** 2
 
-    #     # (optional) penalize high pitch rate
-    #     cost_rate = float(self.cfg.w_rate) * (rate ** 2)
+        # (optional) penalize high pitch rate
+        cost_rate = float(self.cfg.w_rate) * (rate ** 2)
 
-    #     # ----------------------------
-    #     # 3) don't go backward + control regularization
-    #     # ----------------------------
-    #     w_back = 150.0
-    #     cost_back = w_back * torch.relu(-vx) ** 2
+        # ----------------------------
+        # 3) don't go backward + control regularization
+        # ----------------------------
+        w_back = 150.0
+        cost_back = w_back * torch.relu(-vx) ** 2
 
-    #     cost_u = float(self.cfg.w_u) * (u ** 2)
+        cost_u = float(self.cfg.w_u) * (u ** 2)
 
-    #     # return cost_progress + cost_pitch_lim + cost_rate + cost_back + cost_u
-    #     return cost_progress #+ cost_u + cost_rate #+ cost_back
+        # return cost_progress + cost_pitch_lim + cost_rate + cost_back + cost_u
+        return cost_progress #+ cost_u + cost_rate #+ cost_back
     
 
     # COST FUNCTION FOR WHEELIE
@@ -147,20 +147,20 @@ class MPPICore:
 
     # COST FUNCTION FOR FLIP
 
-    def stage_cost_torch(self, states: torch.Tensor, actions: torch.Tensor, obs_x: torch.Tensor) -> torch.Tensor:
-        # states: (K,4) = [x, vx, flip(pitch), rate]
-        flip = states[:, 2]
-        u = actions
+    # def stage_cost_torch(self, states: torch.Tensor, actions: torch.Tensor, obs_x: torch.Tensor) -> torch.Tensor:
+    #     # states: (K,4) = [x, vx, flip(pitch), rate]
+    #     flip = states[:, 2]
+    #     u = actions
 
-        # wrapped angle error to target (in radians)
-        pitch_err = geometry.angdiff_torch(flip, self.pitch_target_t)  # (K,)
+    #     # wrapped angle error to target (in radians)
+    #     pitch_err = geometry.angdiff_torch(flip, self.pitch_target_t)  # (K,)
 
-        # flip tracking cost only
-        cost_pitch = 100 * pitch_err ** 2
+    #     # flip tracking cost only
+    #     cost_pitch = 100 * pitch_err ** 2
 
-        cost_u = 100 * u ** 2
+    #     cost_u = 100 * u ** 2
 
-        return cost_pitch + cost_u
+    #     return cost_pitch + cost_u
     
 
     # def stage_cost_flip_u(self, states, actions):
