@@ -58,7 +58,7 @@ class MPPIConfig:
     u_max: float = 1.0
 
     # Target / stop conditions
-    pitch_target: float = 1.39
+    pitch_target: float = 1.45
     flip_stop_abs: float = 2.2
 
     # Paths to trained SVGP models

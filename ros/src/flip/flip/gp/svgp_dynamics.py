@@ -405,6 +405,23 @@ class SVGPManager:
     # ----------------------------- #
     # PREDICT (same signature)
     # ----------------------------- #
+    # def predict_torch(self, X):
+    #     if not self.trained or self.model is None or self.likelihood is None:
+    #         raise RuntimeError("SVGP has not been trained yet.")
+    #     if self.X_mean is None or self.X_std is None or self.Y_mean is None or self.Y_std is None:
+    #         raise RuntimeError("Normalization stats missing.")
+
+    #     X = torch.as_tensor(X, dtype=torch.float32, device=self.device)
+    #     Xn = (X - self.X_mean) / self.X_std
+
+    #     with torch.no_grad(), gpytorch.settings.fast_pred_var():
+    #         #pred = self.likelihood(self.model(Xn))
+    #         pred = self.model(Xn)
+    #         mean = pred.mean * self.Y_std + self.Y_mean
+    #         var = pred.variance * (self.Y_std ** 2)
+    #     return mean, var
+
+
     def predict_torch(self, X):
         if not self.trained or self.model is None or self.likelihood is None:
             raise RuntimeError("SVGP has not been trained yet.")
@@ -420,6 +437,7 @@ class SVGPManager:
             mean = pred.mean * self.Y_std + self.Y_mean
             var = pred.variance * (self.Y_std ** 2)
         return mean, var
+
 
     # ----------------------------- #
     # Convenience

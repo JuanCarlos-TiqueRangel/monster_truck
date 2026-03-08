@@ -9,6 +9,7 @@ import torch
 import matplotlib.pyplot as plt
 
 from gp_dynamics import GPManager
+from svgp_dynamics import SVGPManager
 
 
 # -----------------------------
@@ -87,7 +88,8 @@ def safe_name(name: str) -> str:
 # -----------------------------
 # GPManager-adapted predict
 # -----------------------------
-def gp_predict_mean_std(gp: GPManager, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+#def gp_predict_mean_std(gp: GPManager, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def gp_predict_mean_std(gp: SVGPManager, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
     Your GPManager API:
       mean, var = gp.predict_torch(X)
@@ -140,7 +142,7 @@ def main():
 
     script_dir = Path(__file__).resolve().parent     # obstacles/gp
     obstacles_dir = script_dir.parent                # obstacles
-    npz_path = obstacles_dir / "data" / "mujoco_manual_wheelie.npz"
+    npz_path = obstacles_dir / "data" / "mujoco_manual_run_obs.npz"
 
     input_  = ["x_pose", "linear_speed_x", "flip", "rate", "u"]
     output_ = ["x_pose", "linear_speed_x", "flip", "rate"]
@@ -195,7 +197,8 @@ def main():
             continue
 
         # IMPORTANT: your load is a classmethod
-        gp = GPManager.load(str(model_path), device=device)
+        # gp = GPManager.load(str(model_path), device=device)
+        gp = SVGPManager.load(str(model_path), device=device)
 
         mu, std = gp_predict_mean_std(gp, X_test)
         y = Y_test[:, j].reshape(-1)

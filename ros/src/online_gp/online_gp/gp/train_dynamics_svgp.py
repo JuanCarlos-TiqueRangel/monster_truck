@@ -239,13 +239,10 @@ if __name__ == "__main__":
     obstacles_dir = script_dir.parent                   # obstacles
 
     # file names mujoco_manual_run_flip, mujoco_manual_wheelie, mujoco_manual_run_svgp, mujoco_manual_run_obs
-    npz = obstacles_dir / "data" / "mujoco_manual_run_flip.npz"
+    npz = obstacles_dir / "data" / "mujoco_manual_run_obs.npz"
 
-    # input_  = ["x_pose", "linear_speed_x", "flip", "rate", "u"]
-    # output_ = ["x_pose", "linear_speed_x", "flip", "rate"]
-
-    input_=["up_z", "up_z_dot", "u"]
-    output_=["up_z", "up_z_dot"]
+    input_  = ["x_pose", "linear_speed_x", "flip", "rate", "u"]
+    output_ = ["x_pose", "linear_speed_x", "flip", "rate"]
 
     mode = "derivative"  # derivative | delta | next
 
