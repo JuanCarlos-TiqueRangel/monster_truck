@@ -1,0 +1,9 @@
+# configuration files for folders and file names
+
+files:
+    mujoco_model: "monstertruck.xml"
+    ini_data_file: "mujoco_random_flip.npz"
+
+models: 
+    up_z: "svgp_dynamics_up_z_d_dt.pt"
+    up_z_dot: "svgp_dynamics_up_z_dot_d_dt.pt"

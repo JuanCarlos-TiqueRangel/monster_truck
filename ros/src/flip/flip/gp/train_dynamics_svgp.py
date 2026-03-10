@@ -12,11 +12,15 @@ Expected NPZ: arrays keyed by your chosen signal names.
 
 from __future__ import annotations
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
 import torch
+
+from pathlib import Path
+import sys
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+from config.config_loader import cfg_params
 
 from svgp_dynamics import SVGPManager
 
@@ -36,7 +40,7 @@ class TrainSVGPConfig:
     N_target: int | None = None       # None -> use all
     seed: int = 123
 
-    kernel: str = "RQ"
+    kernel: str = "RBF"
     iters: int = 300
     lr: float = 0.01
     batch_size: int = 256
@@ -239,7 +243,10 @@ if __name__ == "__main__":
     obstacles_dir = script_dir.parent                   # obstacles
 
     # file names mujoco_manual_run_flip, mujoco_manual_wheelie, mujoco_manual_run_svgp, mujoco_manual_run_obs
-    npz = obstacles_dir / "data" / "mujoco_manual_run_flip.npz"
+    #npz = obstacles_dir / "data" / "mujoco_manual_run_flip.npz"
+    npz_file = cfg_params.files.ini_data_file
+    npz = obstacles_dir / "data" / npz_file
+    # npz = obstacles_dir / "data" / "mujoco_random_run_flip.npz"
 
     # input_  = ["x_pose", "linear_speed_x", "flip", "rate", "u"]
     # output_ = ["x_pose", "linear_speed_x", "flip", "rate"]
@@ -251,20 +258,20 @@ if __name__ == "__main__":
 
     cfg = TrainSVGPConfig(
         npz_path=str(npz),
-        dt=0.1,
+        dt=0.02,
         input_keys=input_,
         output_keys=output_,
         target_mode=mode,
         N_target=1000,
         seed=123,
 
-        kernel="RQ",
+        kernel="RBF",
         iters=300,
         lr=0.01,
         batch_size=256,
-        num_inducing=256,
+        num_inducing=128,
         learn_inducing_locations=True,
-        freeze_norm=True,
+        freeze_norm=True, # If is true, it does not Recompute x_mean and x_Std on the whole dataset.
         device="cuda",
 
         out_dir="models",

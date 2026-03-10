@@ -1,17 +1,13 @@
 # utils/mppi_core.py
-import math
 import torch
+
 
 class MPPICore:
     """
-    Flip-only MPPI core.
+    Fast flip-only MPPI core.
 
-    State: (K,4) = [x, vx, up, up_dot]
-      up     = uprightness = R[2,2] in [-1,1]
-      up_dot = time derivative of up (computed from gyro)
-
-    Input feature to GPs:
-      X = [x, vx, up, up_dot, a]
+    State: [up, up_dot]
+    Input to GP: [up, up_dot, action]
     """
 
     def __init__(self, cfg, device, gp_up_z, gp_up_z_dot, model_lock, logger=None):
@@ -19,106 +15,117 @@ class MPPICore:
         self.device = device
         self.logger = logger
 
-        self.gp_up_z      = gp_up_z   # now models d(up)/dt
-        self.gp_up_z_dot  = gp_up_z_dot   # now models d(up_dot)/dt
-
+        self.gp_up_z = gp_up_z
+        self.gp_up_z_dot = gp_up_z_dot
         self.model_lock = model_lock
 
         self.plan = None
-        self.last_mean_cost = 0.0
+        self.last_mean_cost = None  # avoid hot-path sync every step
+
+        # reusable buffers
+        self._buf_K = None
+        self._buf_H = None
+        self._X_buf = None
+        self._next_states_buf = None
 
     def reset_plan(self):
         self.plan = None
 
     def set_models(self, gp_up_z, gp_up_z_dot):
-        self.gp_up_z      = gp_up_z   # now models d(up)/dt
-        self.gp_up_z_dot  = gp_up_z_dot   # now models d(up_dot)/dt
+        self.gp_up_z = gp_up_z
+        self.gp_up_z_dot = gp_up_z_dot
 
-    # -----------------------------
-    # Conservative flip cost
-    # -----------------------------
+    def _ensure_buffers(self, K: int):
+        if self._buf_K == K and self._X_buf is not None:
+            return
+
+        self._buf_K = K
+        self._X_buf = torch.empty((K, 3), dtype=torch.float32, device=self.device)
+        self._next_states_buf = torch.empty((K, 2), dtype=torch.float32, device=self.device)
+
     def stage_cost_torch(self, states: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
-        # states: (K,4) = [up, up_dot]
-        up     = states[:, 0]
+        up = states[:, 0]
         up_dot = states[:, 1]
-        a      = actions
+        a = actions
 
-        # Conservative: just "be upright" + "don't spin too much" + "don't use huge control"
-        cost_up     = float(self.cfg.w_up_z)     * (1.0 - up) ** 2
-        cost_updot  = float(self.cfg.w_up_z_dot)  * (up_dot ** 2)
-        cost_act    = float(self.cfg.w_u)    * (a ** 2)
+        cost_up = float(self.cfg.w_up_z) * (1.0 - up) ** 2
+        cost_updot = float(self.cfg.w_up_z_dot) * (up_dot ** 2)
+        cost_act = float(self.cfg.w_u) * (a ** 2)
 
-        return cost_up + cost_updot + cost_act
+        return cost_up #+ cost_updot #+ cost_act
 
-    # -----------------------------
-    # GP rollout dynamics
-    # -----------------------------
-    def gp_step_batch_torch(self, states: torch.Tensor, actions: torch.Tensor):
-        # states: (K,4) = [up, up_dot]
-        up    = states[:, 0]
-        updot = states[:, 1]
+    def gp_step_batch_torch(self, states: torch.Tensor, actions: torch.Tensor, gp_mean_fn, dt: float):
+        """
+        Uses reusable buffers and mean-only GP.
+        """
+        X = self._X_buf
+        X[:, 0].copy_(states[:, 0])
+        X[:, 1].copy_(states[:, 1])
+        X[:, 2].copy_(actions)
 
-        X = torch.stack([up, updot, actions], dim=-1)  # (K,2)
+        dud_mean = gp_mean_fn(X)
 
-        # with self.model_lock:
-        #     dud_mean, _ = self.gp_up_z_dot.predict_torch(X)
+        next_states = self._next_states_buf
+        next_states[:, 0].copy_(states[:, 0]).add_(states[:, 1], alpha=dt)   # up + updot*dt
+        next_states[:, 1].copy_(states[:, 1]).add_(dud_mean, alpha=dt)        # updot + dud_mean*dt
 
-        # dt = float(self.cfg.ctrl_dt)
-        # next_states = torch.empty_like(states)
-        # next_states[:, 0] = up    + updot * dt
-        # next_states[:, 1] = updot + dud_mean * dt
-        # return next_states, None
+        return next_states
 
-        with self.model_lock:
-            dup_mean, _   = self.gp_up_z.predict_torch(X)   # d(up)/dt
-            dud_mean, _   = self.gp_up_z_dot.predict_torch(X)   # d(up_dot)/dt
-
-        dt = float(self.cfg.ctrl_dt)
-
-        next_states = torch.empty_like(states)
-        next_states[:, 0] = up    + dup_mean * dt
-        next_states[:, 1] = updot + dud_mean * dt
-
-        return next_states, None
-
-    @torch.no_grad()
+    @torch.inference_mode()
     def action(self, x0_np):
         cfg = self.cfg
-        H, K = int(cfg.horizon), int(cfg.num_rollouts)
+        H = int(cfg.horizon)
+        K = int(cfg.num_rollouts)
+        dt = float(cfg.ctrl_dt)
+
+        self._ensure_buffers(K)
+
+        # Snapshot GP reference once.
+        # This is much cheaper than holding the lock for the whole rollout.
+        with self.model_lock:
+            gp_mean_fn = self.gp_up_z_dot.predict_mean_torch
 
         x0 = torch.as_tensor(x0_np, dtype=torch.float32, device=self.device)
         if x0.shape != (2,):
             raise ValueError(f"x0 must be shape (2,), got {tuple(x0.shape)}")
 
-        u_init = torch.zeros(H, dtype=torch.float32, device=self.device) if self.plan is None else self.plan
+        if self.plan is None or self.plan.shape[0] != H:
+            u_init = torch.zeros(H, dtype=torch.float32, device=self.device)
+        else:
+            u_init = self.plan
 
-        eps = torch.randn(K, H, device=self.device) * float(cfg.sigma)
-        U = torch.clamp(u_init.unsqueeze(0) + eps, float(cfg.u_min), float(cfg.u_max))
+        # Sample controls
+        eps = torch.randn((K, H), dtype=torch.float32, device=self.device)
+        eps.mul_(float(cfg.sigma))
+
+        U = u_init.unsqueeze(0) + eps
+        U.clamp_(float(cfg.u_min), float(cfg.u_max))
+
         delta = U - u_init.unsqueeze(0)
 
-        states = x0.unsqueeze(0).repeat(K, 1)
-        costs  = torch.zeros(K, dtype=torch.float32, device=self.device)
+        # Initial rollout states
+        states = torch.empty((K, 2), dtype=torch.float32, device=self.device)
+        states[:, 0].fill_(x0[0].item())
+        states[:, 1].fill_(x0[1].item())
+
+        costs = torch.zeros(K, dtype=torch.float32, device=self.device)
 
         for t in range(H):
             a_t = U[:, t]
-            stage = self.stage_cost_torch(states, a_t)
-            states, _ = self.gp_step_batch_torch(states, a_t)
+            costs.add_(self.stage_cost_torch(states, a_t))
+            states = self.gp_step_batch_torch(states, a_t, gp_mean_fn, dt)
 
-            if not torch.isfinite(states).all():
-                if self.logger:
-                    self.logger.error("Rollout produced non-finite states (GP output NaN/Inf).")
-                break
+        # Optional: only compute for debugging outside critical path if needed
+        # self.last_mean_cost = float(costs.mean().item())
 
-            costs = costs + stage
-
-        self.last_mean_cost = float(costs.mean().item())
-
-        J_min = costs.min()
+        J_min = torch.min(costs)
         w = torch.exp(-(costs - J_min) / float(cfg.lambda_))
-        wsum = w.sum() + 1e-8
+        wsum = torch.sum(w) + 1e-8
 
-        du = (w.unsqueeze(1) * delta).sum(dim=0) / wsum
+        du = torch.sum(w.unsqueeze(1) * delta, dim=0) / wsum
         u_new = torch.clamp(u_init + du, float(cfg.u_min), float(cfg.u_max))
 
-        self.plan = torch.cat([u_new[1:], u_new[-1:]], dim=0).detach()
-        return float(u_new[0].detach().cpu())
+        self.plan = torch.cat([u_new[1:], u_new[-1:]], dim=0)
+
+        # One CPU sync only here
+        return float(u_new[0])
