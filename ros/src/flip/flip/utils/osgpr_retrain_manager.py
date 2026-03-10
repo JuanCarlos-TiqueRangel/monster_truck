@@ -9,7 +9,6 @@ import gpytorch
 
 from gp.svgp_dynamics import SVGPManager
 
-
 # ------------------------------------------------------------
 # Build (X, y) derivative dataset from logged trajectories
 # ------------------------------------------------------------

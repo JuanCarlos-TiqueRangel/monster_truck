@@ -7,8 +7,6 @@ import traceback
 import threading
 import time
 
-from pathlib import Path
-
 import numpy as np
 import torch
 
@@ -23,11 +21,16 @@ from nav_msgs.msg import Odometry
 from queue import SimpleQueue, Empty
 
 
+# File configuration
+from pathlib import Path
+import sys
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+from config.config_loader import cfg_params
+
+
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 GP_DIR   = BASE_DIR / "gp"
-
-from utils import geometry
 
 # SVGP manager (your class)
 from gp.svgp_dynamics import SVGPManager
@@ -54,7 +57,7 @@ class MPPIConfig:
 
     # Timing
     ctrl_dt: float = 0.02
-    horizon: int = 40
+    horizon: int = 20
     num_rollouts: int = 256
 
     # MPPI hyper-parameters
@@ -65,9 +68,8 @@ class MPPIConfig:
     u_max: float = 1.0
 
     # Target / stop conditions
-    up_goal: float = 0.8
+    up_goal: float = 0.99
     updot_goal: float = 2.0
-    hold_time_sec: float = 0.01
 
     # Goal definition:
     # - sim: absolute x >= goal_x (like before)
@@ -84,8 +86,8 @@ class MPPIConfig:
             raise ValueError(f"Unknown run_mode: {self.run_mode}")
 
     # Paths to trained SVGP models
-    gp_up_z_path: str = str(GP_DIR / "models" / "svgp_dynamics_up_z_d_dt.pt")
-    gp_up_z_dot_path: str = str(GP_DIR / "models" / "svgp_dynamics_up_z_dot_d_dt.pt")
+    gp_up_z_path: str = str(GP_DIR / "models" / cfg_params.models.up_z)
+    gp_up_z_dot_path: str = str(GP_DIR / "models" / cfg_params.models.up_z_dot)
 
     # ---- logging ----
     log_dir: str = str(BASE_DIR / "logs")
@@ -95,7 +97,7 @@ class MPPIConfig:
     min_points_to_train: int = 5
     max_points_for_train: int = 50_000
     min_new_points_between_trains: int = 5
-    retrain_every_episodes: int = 10
+    retrain_every_episodes: int = 1
     svgp_warm_steps: int = 200
 
     # ---- live learning curve plot ----
@@ -103,26 +105,27 @@ class MPPIConfig:
     live_plot_save_png: bool = True
     live_plot_mode: str = "both"
 
-    episode_timeout_sec: float = 120.0
+    episode_timeout_sec: float = 60.0
 
     # ---- seed dataset ----
-    seed_npz_path: str = str(DATA_DIR / "mujoco_manual_flip.npz")
+    # seed_npz_path: str = str(DATA_DIR / "mujoco_manual_flip.npz")
+    seed_npz_path: str = str(DATA_DIR / cfg_params.files.ini_data_file)
     seed_episode_id: int = -1
     keep_seed: bool = True
 
     # ---- weights ----
-    w_up_z: float = 1.1
+    w_up_z: float = 30.1
     w_u: float = 100.1
     w_up_z_dot: float = 1.0
 
     # --- OSGPR-style streaming update (trainable Z) ---
     osgpr_steps: int = 60
     osgpr_batch_size: int = 256
-    osgpr_lr_theta: float = 1e-2
+    osgpr_lr_theta: float = 1e-3
     osgpr_lr_z: float = 2e-4
-    osgpr_anchor_beta: float = 0.05
+    osgpr_anchor_beta: float = 0.1
     osgpr_z_reg: float = 1e-3
-    osgpr_freeze_hypers: bool = False
+    osgpr_freeze_hypers: bool = True # freeze hypers if desired (recommended for stability)
 
 
 # ============================================================
@@ -199,7 +202,7 @@ class MPPICarControllerNode(Node):
         self.timer = self.create_timer(self.cfg.ctrl_dt, self.control_timer_cb)
         self.get_logger().info("MPPI Car Controller node initialized.")
 
-        # Locks + managers
+        # Locks + managers lock to avoid crashes and keep synchronization 
         self.model_lock = threading.Lock()
 
         self.mppi = MPPICore(
@@ -620,11 +623,6 @@ class MPPICarControllerNode(Node):
         
         self.warned_no_imu = False
 
-        # # Need valid odom
-        # if not self.last_odom_valid:
-        #     self.publish_u(0.0)
-        #     return
-
         if self.is_sim:
             up_z = float(self.last_up_z)
             up_z_dot = float(self.last_up_z_dot)
@@ -639,14 +637,8 @@ class MPPICarControllerNode(Node):
                 self.end_episode(reason=f"TIMEOUT ({elapsed_ep:.2f}s)", allow_retrain=True)
                 return
 
-        # # Emergency stop (up_z too large)
-        # if abs(up_z) >= float(cfg.up_z_stop_abs):
-        #     self.end_episode(reason="EMERGENCY_STOP (up_z too large)", allow_retrain=True)
-        #     return
-
-        hold_steps_needed = max(1, int(round(cfg.hold_time_sec / cfg.ctrl_dt)))
-
-        if (up_z >= cfg.up_goal) and (abs(up_z_dot) <= cfg.updot_goal):
+        #if (up_z >= cfg.up_goal) and (abs(up_z_dot) <= cfg.updot_goal):
+        if up_z >= cfg.up_goal:
             self.end_episode(
                 reason=f"GOAL_REACHED (up_z={up_z:.3f}, up_z_dot={up_z_dot:.3f})",
                 allow_retrain=True,
@@ -658,7 +650,11 @@ class MPPICarControllerNode(Node):
 
 
         try:
+            t0 = time.perf_counter()
             u_cmd = self.mppi.action(x0)
+            # torch.cuda.synchronize()
+            # dt_ms = 1e3 * (time.perf_counter() - t0)
+            # #self.get_logger().info(f"MPPI action time: {dt_ms:.3f} ms")
             if not math.isfinite(u_cmd):
                 self.get_logger().error("u_cmd is NaN/Inf from MPPI. Forcing 0.")
                 u_cmd = 0.0
@@ -671,8 +667,8 @@ class MPPICarControllerNode(Node):
 
         self._mark_episode_started()
         self._accumulate_executed_cost(x0, u_cmd)
-        #self.publish_u(u_cmd)
-        self.publish_u(0.0)
+        self.publish_u(u_cmd)
+        #self.publish_u(0.0)
         self._log_step(up_z, up_z_dot, u_cmd)
 
 

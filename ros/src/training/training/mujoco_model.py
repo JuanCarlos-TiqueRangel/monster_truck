@@ -15,7 +15,7 @@ from geometry_msgs.msg import PoseStamped
 # ============================================================
 # SIMPLE EXPERIMENT FLAG (change this line only)
 # ============================================================
-START_FLIPPED = False   # True: upside-down at start/reset | False: upright
+START_FLIPPED = True   # True: upside-down at start/reset | False: upright
 
 
 class MujocoImuNode(Node):

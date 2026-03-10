@@ -28,7 +28,7 @@ from utils.geometry import quat_to_R, up_and_updot_from_quat_gyro
 @dataclass
 class Config:
     # Logging sampling (fixed wall dt)
-    sample_dt: float = 0.1          # [s] logging at 10 Hz (wall-clock)
+    sample_dt: float = 0.02          # [s] logging at 10 Hz (wall-clock)
 
     # Command publish rate (responsive manual control)
     cmd_pub_hz: float = 50.0        # [Hz] publish /cmd_action at 50 Hz (wall-clock)
