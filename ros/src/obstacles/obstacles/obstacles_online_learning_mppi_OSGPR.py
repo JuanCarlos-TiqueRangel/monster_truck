@@ -3,12 +3,8 @@ import math
 from dataclasses import dataclass
 from typing import Optional
 
-import time
 import traceback
-import os
 import threading
-
-from pathlib import Path
 
 import numpy as np
 import torch
@@ -20,6 +16,12 @@ from std_msgs.msg import Float32
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
+
+# File configuration
+from pathlib import Path
+import sys
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+from config.config_loader import cfg_params
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"

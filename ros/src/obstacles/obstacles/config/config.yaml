@@ -1,0 +1,11 @@
+# configuration files for folders and file names
+
+files:
+    mujoco_model: "monstertruck.xml"
+    ini_data_file: "mujoco_random_obstacles.npz"
+
+models: 
+    pitch: "svgp_dynamics_pitch.pt"
+    pitch_dot: "svgp_dynamics_pitch_dot.pt"
+    xpose: "svgp_dynamics_xpose.pt"
+    xpose_dot: "svgp_dynamics_xpose_dot.py"
