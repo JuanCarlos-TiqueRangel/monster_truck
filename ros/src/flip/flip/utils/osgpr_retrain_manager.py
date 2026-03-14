@@ -417,6 +417,7 @@ class OSGPRTrainableZRetrainManager:
                 z_reg=float(self.cfg.osgpr_z_reg),
                 freeze_hypers=bool(self.cfg.osgpr_freeze_hypers),
             )
+            
             osgpr_trainablez_stream_update(
                 gp_up_z_dot, X, y_dup_z_dot,
                 steps=int(self.cfg.osgpr_steps),
