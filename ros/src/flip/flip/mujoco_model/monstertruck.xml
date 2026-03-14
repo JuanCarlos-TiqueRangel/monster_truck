@@ -22,12 +22,12 @@
 
     <!-- obstacles -->
     <geom name="obs_box_1" type="box"
-          pos="2.0 0.0 10.05"
+          pos="2.0 0.0 0.05"
           size="0.30 0.30 0.10"
           rgba="0.2 0.2 0.8 1"/>
 
     <geom name="pole_1" type="cylinder"
-          pos="6.0 0.0 10.0"
+          pos="6.0 0.0 0.05"
           size="0.10 1.50"
           euler="1.5708 0 0"
           rgba="0.2 0.7 0.2 1"/>

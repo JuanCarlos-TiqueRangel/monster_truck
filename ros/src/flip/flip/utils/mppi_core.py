@@ -54,22 +54,45 @@ class MPPICore:
 
         return cost_up #+ cost_updot #+ cost_act
 
-    def gp_step_batch_torch(self, states: torch.Tensor, actions: torch.Tensor, gp_mean_fn, dt: float):
-        """
-        Uses reusable buffers and mean-only GP.
-        """
+    # def gp_step_batch_torch(self, states: torch.Tensor, actions: torch.Tensor, gp_mean_fn, dt: float):
+    #     """
+    #     Uses reusable buffers and mean-only GP.
+    #     """
+    #     X = self._X_buf
+    #     X[:, 0].copy_(states[:, 0])
+    #     X[:, 1].copy_(states[:, 1])
+    #     X[:, 2].copy_(actions)
+
+    #     dud_mean = gp_mean_fn(X)
+
+    #     next_states = self._next_states_buf
+    #     next_states[:, 0].copy_(states[:, 0]).add_(states[:, 1], alpha=dt)   # up + updot*dt
+    #     next_states[:, 1].copy_(states[:, 1]).add_(dud_mean, alpha=dt)        # updot + dud_mean*dt
+
+    #     return next_states
+
+
+
+    def gp_step_batch_torch(self, states: torch.Tensor, actions: torch.Tensor,
+                            gp_mean_fn_up, gp_mean_fn_updot):
         X = self._X_buf
         X[:, 0].copy_(states[:, 0])
         X[:, 1].copy_(states[:, 1])
         X[:, 2].copy_(actions)
 
-        dud_mean = gp_mean_fn(X)
+        d_up = gp_mean_fn_up(X)
+        d_updot = gp_mean_fn_updot(X)
 
         next_states = self._next_states_buf
-        next_states[:, 0].copy_(states[:, 0]).add_(states[:, 1], alpha=dt)   # up + updot*dt
-        next_states[:, 1].copy_(states[:, 1]).add_(dud_mean, alpha=dt)        # updot + dud_mean*dt
+        next_states[:, 0].copy_(states[:, 0]).add_(d_up)
+        next_states[:, 1].copy_(states[:, 1]).add_(d_updot)
+
+        # optional safety clamp
+        next_states[:, 0].clamp_(-1.2, 1.2)
 
         return next_states
+
+
 
     @torch.inference_mode()
     def action(self, x0_np):
@@ -83,7 +106,8 @@ class MPPICore:
         # Snapshot GP reference once.
         # This is much cheaper than holding the lock for the whole rollout.
         with self.model_lock:
-            gp_mean_fn = self.gp_up_z_dot.predict_mean_torch
+            gp_mean_fn_up = self.gp_up_z.predict_mean_torch
+            gp_mean_fn_updot = self.gp_up_z_dot.predict_mean_torch
 
         x0 = torch.as_tensor(x0_np, dtype=torch.float32, device=self.device)
         if x0.shape != (2,):
@@ -113,7 +137,7 @@ class MPPICore:
         for t in range(H):
             a_t = U[:, t]
             costs.add_(self.stage_cost_torch(states, a_t))
-            states = self.gp_step_batch_torch(states, a_t, gp_mean_fn, dt)
+            states = self.gp_step_batch_torch(states, a_t, gp_mean_fn_up, gp_mean_fn_updot)
 
         # Optional: only compute for debugging outside critical path if needed
         # self.last_mean_cost = float(costs.mean().item())

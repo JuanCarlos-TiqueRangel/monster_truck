@@ -5,5 +5,7 @@ files:
     ini_data_file: "mujoco_random_flip.npz"
 
 models: 
-    up_z: "svgp_dynamics_up_z_d_dt.pt"
-    up_z_dot: "svgp_dynamics_up_z_dot_d_dt.pt"
+    up_z: "svgp_dynamics_up_z_delta.pt"
+    up_z_dot: "svgp_dynamics_up_z_dot_delta.pt"
+    # up_z: "svgp_dynamics_up_z_d_dt.pt"
+    # up_z_dot: "svgp_dynamics_up_z_dot_d_dt.pt"

@@ -36,7 +36,7 @@ class TrainSVGPConfig:
     input_keys: List[str]
     output_keys: List[str]
 
-    target_mode: str = "derivative"   # "derivative" | "delta" | "next"
+    target_mode: str = "delta"   # "derivative" | "delta" | "next"
     N_target: int | None = None       # None -> use all
     seed: int = 123
 
@@ -254,7 +254,7 @@ if __name__ == "__main__":
     input_=["up_z", "up_z_dot", "u"]
     output_=["up_z", "up_z_dot"]
 
-    mode = "derivative"  # derivative | delta | next
+    mode = "delta"  # derivative | delta | next
 
     cfg = TrainSVGPConfig(
         npz_path=str(npz),

@@ -9,6 +9,40 @@ import gpytorch
 
 from gp.svgp_dynamics import SVGPManager
 
+
+def _rmse_np(y_true, y_pred):
+    y_true = np.asarray(y_true, dtype=np.float32).reshape(-1)
+    y_pred = np.asarray(y_pred, dtype=np.float32).reshape(-1)
+    return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
+
+
+def _mae_np(y_true, y_pred):
+    y_true = np.asarray(y_true, dtype=np.float32).reshape(-1)
+    y_pred = np.asarray(y_pred, dtype=np.float32).reshape(-1)
+    return float(np.mean(np.abs(y_true - y_pred)))
+
+
+def _predict_mean_np(model, X_np):
+    """
+    Robust helper:
+    - accepts X as numpy
+    - calls model.predict_torch(...)
+    - handles either:
+        mean_tensor
+      or
+        (mean_tensor, var_tensor)
+    - returns mean as numpy vector shape (N,)
+    """
+    X_t = torch.as_tensor(X_np, dtype=torch.float32)
+    out = model.predict_torch(X_t)
+
+    if isinstance(out, tuple):
+        mu_t = out[0]
+    else:
+        mu_t = out
+
+    return mu_t.detach().cpu().numpy().reshape(-1)
+
 # ------------------------------------------------------------
 # Build (X, y) derivative dataset from logged trajectories
 # ------------------------------------------------------------
@@ -49,6 +83,42 @@ def build_derivative_dataset(up_z, up_z_dot, u, ep, dt: float):
         return None
 
     return X, y_dup_z, y_dup_z_dot
+
+
+
+def build_delta_dataset(up_z, up_z_dot, u, ep, dt: float):
+    if len(up_z) < 2:
+        return None
+
+    same_ep = (ep[:-1] == ep[1:])
+
+    up_z0 = up_z[:-1][same_ep]
+    up_z_dot0 = up_z_dot[:-1][same_ep]
+    u0 = u[:-1][same_ep]
+
+    up_z1 = up_z[1:][same_ep]
+    up_z_dot1 = up_z_dot[1:][same_ep]
+
+    X = np.stack([up_z0, up_z_dot0, u0], axis=1).astype(np.float32)
+
+    y_d_up_z = (up_z1 - up_z0).astype(np.float32)
+    y_d_up_z_dot = (up_z_dot1 - up_z_dot0).astype(np.float32)
+
+    finite = (
+        np.isfinite(X).all(axis=1)
+        & np.isfinite(y_d_up_z)
+        & np.isfinite(y_d_up_z_dot)
+    )
+
+    X = X[finite]
+    y_d_up_z = y_d_up_z[finite]
+    y_d_up_z_dot = y_d_up_z_dot[finite]
+
+    if X.shape[0] == 0:
+        return None
+
+    return X, y_d_up_z, y_d_up_z_dot
+
 
 # -----------------------------
 # Robust access to variational params
@@ -320,7 +390,8 @@ class OSGPRTrainableZRetrainManager:
         t0 = time.perf_counter()
         dt = float(self.cfg.ctrl_dt)
 
-        built = build_derivative_dataset(up_z, up_z_dot, u, ep, dt)
+        #built = build_derivative_dataset(up_z, up_z_dot, u, ep, dt)
+        built = build_delta_dataset(up_z, up_z_dot, u, ep, dt)
         if built is None:
             if self.logger:
                 self.logger.warn("OSGPR(trainableZ): not enough valid consecutive samples to build derivative dataset.")
