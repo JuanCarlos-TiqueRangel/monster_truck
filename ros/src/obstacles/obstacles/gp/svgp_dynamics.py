@@ -405,22 +405,52 @@ class SVGPManager:
     # ----------------------------- #
     # PREDICT (same signature)
     # ----------------------------- #
-    def predict_torch(self, X):
-        if not self.trained or self.model is None or self.likelihood is None:
+    # def predict_torch(self, X):
+    #     if not self.trained or self.model is None or self.likelihood is None:
+    #         raise RuntimeError("SVGP has not been trained yet.")
+    #     if self.X_mean is None or self.X_std is None or self.Y_mean is None or self.Y_std is None:
+    #         raise RuntimeError("Normalization stats missing.")
+
+    #     X = torch.as_tensor(X, dtype=torch.float32, device=self.device)
+    #     Xn = (X - self.X_mean) / self.X_std
+
+    #     with torch.no_grad(), gpytorch.settings.fast_pred_var():
+    #         #pred = self.likelihood(self.model(Xn))
+    #         pred = self.model(Xn)
+    #         mean = pred.mean * self.Y_std + self.Y_mean
+    #         var = pred.variance * (self.Y_std ** 2)
+    #     return mean, var
+
+
+    @torch.inference_mode()
+    def predict_mean_torch(self, X: torch.Tensor) -> torch.Tensor:
+        """
+        Fast mean-only inference for control.
+        Returns denormalized predictive mean only.
+        """
+        if not self.trained or self.model is None:
             raise RuntimeError("SVGP has not been trained yet.")
         if self.X_mean is None or self.X_std is None or self.Y_mean is None or self.Y_std is None:
             raise RuntimeError("Normalization stats missing.")
 
-        X = torch.as_tensor(X, dtype=torch.float32, device=self.device)
+        # Assume X is already a torch tensor on the correct device in the hot loop.
+        if not isinstance(X, torch.Tensor):
+            X = torch.as_tensor(X, dtype=torch.float32, device=self.device)
+        else:
+            if X.device != self.device:
+                X = X.to(self.device, non_blocking=True)
+            if X.dtype != torch.float32:
+                X = X.float()
+
         Xn = (X - self.X_mean) / self.X_std
 
-        with torch.no_grad(), gpytorch.settings.fast_pred_var():
-            #pred = self.likelihood(self.model(Xn))
-            pred = self.model(Xn)
-            mean = pred.mean * self.Y_std + self.Y_mean
-            var = pred.variance * (self.Y_std ** 2)
-        return mean, var
+        # Mean only. No variance.
+        pred = self.model(Xn)
+        mean = pred.mean * self.Y_std + self.Y_mean
+        return mean
+    
 
+    
     # ----------------------------- #
     # Convenience
     # ----------------------------- #

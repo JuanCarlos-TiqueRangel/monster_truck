@@ -18,6 +18,11 @@ from std_msgs.msg import Float32
 from sensor_msgs.msg import Imu
 from nav_msgs.msg import Odometry
 
+# File configuration
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+from config.config_loader import cfg_params
+
 
 # ============================================================
 # Config

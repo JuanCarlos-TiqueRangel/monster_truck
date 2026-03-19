@@ -14,44 +14,44 @@ class DatasetBuffer:
         os.makedirs(self.log_dir, exist_ok=True)
 
         self.lock = threading.Lock()
-        self.log_flip = deque(maxlen=maxlen)
-        self.log_rate = deque(maxlen=maxlen)
+        self.log_xpos    = deque(maxlen=maxlen)
+        self.log_xpos_dot   = deque(maxlen=maxlen)
+        self.log_pitch = deque(maxlen=maxlen)
+        self.log_pitch_dot = deque(maxlen=maxlen)
         self.log_u    = deque(maxlen=maxlen)
         self.log_ep   = deque(maxlen=maxlen)
-        self.log_x    = deque(maxlen=maxlen)
-        self.log_vx   = deque(maxlen=maxlen)
 
     def n_points(self) -> int:
         with self.lock:
-            return len(self.log_flip)
+            return len(self.log_pitch)
 
-    def append_step(self, flip_rel: float, rate: float, x: float, vx: float, u: float, episode_id: int):
+    def append_step(self, pitch: float, pitch_dot: float, xpos: float, xpos_dot: float, u: float, episode_id: int):
         with self.lock:
-            self.log_flip.append(float(flip_rel))
-            self.log_rate.append(float(rate))
-            self.log_x.append(float(x))
-            self.log_vx.append(float(vx))
+            self.log_xpos.append(float(xpos))
+            self.log_xpos_dot.append(float(xpos_dot))
+            self.log_pitch.append(float(pitch))
+            self.log_pitch_dot.append(float(pitch_dot))
             self.log_u.append(float(u))
             self.log_ep.append(int(episode_id))
 
     def snapshot(self):
         with self.lock:
-            flip = np.asarray(list(self.log_flip), dtype=np.float32)
-            rate = np.asarray(list(self.log_rate), dtype=np.float32)
-            x    = np.asarray(list(self.log_x), dtype=np.float32)
-            vx   = np.asarray(list(self.log_vx), dtype=np.float32)
+            xpos    = np.asarray(list(self.log_xpos), dtype=np.float32)
+            xpos_dot   = np.asarray(list(self.log_xpos_dot), dtype=np.float32)
+            pitch = np.asarray(list(self.log_pitch), dtype=np.float32)
+            pitch_dot = np.asarray(list(self.log_pitch_dot), dtype=np.float32)
             u    = np.asarray(list(self.log_u), dtype=np.float32)
             ep   = np.asarray(list(self.log_ep), dtype=np.int64)
-        return flip, rate, x, vx, u, ep
+        return pitch, pitch_dot, xpos, xpos_dot, u, ep
 
-    def save_npz(self, episode_id: int, flip, rate, x, vx, u, ep):
+    def save_npz(self, episode_id: int, pitch, pitch_dot, xpos, xpos_dot, u, ep):
         out = os.path.join(self.log_dir, f"dataset_ep{int(episode_id):04d}.npz")
         np.savez_compressed(
             out,
-            flip=flip,
-            rate=rate,
-            x_pose=x,
-            linear_speed_x=vx,
+            xpos=xpos,
+            xpos_dot=xpos_dot,
+            pitch=pitch,
+            pitch_dot=pitch_dot,
             u=u,
             episode_id=ep,
             dt=np.array(self.ctrl_dt, dtype=np.float32),
@@ -61,7 +61,7 @@ class DatasetBuffer:
         return out
 
     @staticmethod
-    def cap_window(M: int, flip, rate, x, vx, u, ep):
-        if len(flip) <= M:
-            return flip, rate, x, vx, u, ep
-        return flip[-M:], rate[-M:], x[-M:], vx[-M:], u[-M:], ep[-M:]
+    def cap_window(M: int, pitch, pitch_dot, xpos, xpos_dot, u, ep):
+        if len(pitch) <= M:
+            return pitch, pitch_dot, xpos, xpos_dot, u, ep
+        return pitch[-M:], pitch_dot[-M:], xpos[-M:], xpos_dot[-M:], u[-M:], ep[-M:]

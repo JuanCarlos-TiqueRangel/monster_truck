@@ -19,13 +19,12 @@ from nav_msgs.msg import Odometry
 
 # ============================================================
 # EASY EXPERIMENT FLAGS / USER OPTIONS
-# Change these first
 # ============================================================
-START_FLIPPED = False                    # True: upside-down at start/reset | False: upright
+START_FLIPPED = False
 
 # Drive model:
 #   "electrical" -> recommended, closer to ESC + motor + battery behavior
-#   "simple"     -> your older torque-envelope style, but improved
+#   "simple"     -> older torque-envelope style
 DRIVE_MODEL = "electrical"
 
 # ESC mode:
@@ -34,13 +33,15 @@ DRIVE_MODEL = "electrical"
 ESC_MODE = "bidirectional"
 
 # Use nominal 4S or fully charged feel
-USE_FULLY_CHARGED_PACK = True          # False -> 14.8 V, True -> 16.8 V
+USE_FULLY_CHARGED_PACK = True
 
 # Optional ESC command lag
 ENABLE_ESC_FILTER = True
-ESC_TAU = 0.035                         # seconds
+ESC_TAU = 0.035
 
-# Start pose heights (tune if needed)
+# These are now PLANAR ROOT heights (root_z), not freejoint body heights.
+# If your XML still has an extra wrapper body between the planar joints and the
+# actual chassis body, you will probably need to reduce these values.
 UPRIGHT_Z0 = 0.169
 FLIPPED_Z0 = 0.182
 
@@ -48,7 +49,7 @@ FLIPPED_Z0 = 0.182
 LOG_DRIVE_DEBUG = False
 
 I_DRIVE_MAX = 160.0
-MAX_TENDON_TORQUE_CMD = 45
+MAX_TENDON_TORQUE_CMD = 45.0
 
 
 class MujocoImuNode(Node):
@@ -75,21 +76,28 @@ class MujocoImuNode(Node):
             f"ctrl_dt={self.ctrl_dt:.6f}, steps_per_ctrl={self.steps_per_ctrl}"
         )
 
-        # ---------------- Find FREE joint ----------------
-        free_j = None
-        for j in range(self.model.njnt):
-            if self.model.jnt_type[j] == mj.mjtJoint.mjJNT_FREE:
-                free_j = j
-                break
-        if free_j is None:
-            raise RuntimeError("No free joint found in model (need <freejoint/>)")
+        # ---------------- Find planar root joints ----------------
+        self.root_x_jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, "root_x")
+        self.root_z_jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, "root_z")
+        self.root_pitch_jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, "root_pitch")
 
-        # qpos layout for free joint: [x y z qw qx qy qz]
-        self.free_qpos_adr = int(self.model.jnt_qposadr[free_j])
-        self.qadr = self.free_qpos_adr + 3
+        if self.root_x_jid < 0 or self.root_z_jid < 0 or self.root_pitch_jid < 0:
+            raise RuntimeError(
+                "Planar joints 'root_x', 'root_z', 'root_pitch' not found in model"
+            )
 
-        # qvel layout for free joint: [vx vy vz wx wy wz]
-        self.free_qvel_adr = int(self.model.jnt_dofadr[free_j])
+        self.root_x_qpos_adr = int(self.model.jnt_qposadr[self.root_x_jid])
+        self.root_z_qpos_adr = int(self.model.jnt_qposadr[self.root_z_jid])
+        self.root_pitch_qpos_adr = int(self.model.jnt_qposadr[self.root_pitch_jid])
+
+        self.root_x_dof_adr = int(self.model.jnt_dofadr[self.root_x_jid])
+        self.root_z_dof_adr = int(self.model.jnt_dofadr[self.root_z_jid])
+        self.root_pitch_dof_adr = int(self.model.jnt_dofadr[self.root_pitch_jid])
+
+        # ---------------- Chassis body id ----------------
+        self.chassis_body_id = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, "chassis")
+        if self.chassis_body_id < 0:
+            raise RuntimeError("Body 'chassis' not found in XML")
 
         # ---------------- IMU sensors ----------------
         gyro_id = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_SENSOR, "imu_gyro")
@@ -136,14 +144,14 @@ class MujocoImuNode(Node):
 
         # Battery / motor electrical parameters
         self.V_bat_oc = 16.8 if USE_FULLY_CHARGED_PACK else 14.8  # [V]
-        self.R_bat = 0.012     # [ohm] battery internal resistance
-        self.R_esc = 0.004     # [ohm] ESC effective resistance
-        self.R_motor = 0.028   # [ohm] motor winding resistance
+        self.R_bat = 0.012
+        self.R_esc = 0.004
+        self.R_motor = 0.028
         self.R_total = self.R_bat + self.R_esc + self.R_motor
 
         self.Kv_rpm_per_V = 2800.0
-        self.Kt = 60.0 / (2.0 * np.pi * self.Kv_rpm_per_V)   # [N*m/A]
-        self.Ke = self.Kt                                     # [V/(rad/s)] in SI
+        self.Kt = 60.0 / (2.0 * np.pi * self.Kv_rpm_per_V)  # [N*m/A]
+        self.Ke = self.Kt                                   # [V/(rad/s)] in SI
 
         self.final_drive = 18.76
         self.eta_drive = 0.85
@@ -162,7 +170,6 @@ class MujocoImuNode(Node):
         self.drag_tanh_eps = 2.0
 
         # Command cap sent into MuJoCo actuator
-        # IMPORTANT: XML ctrlrange must be >= this value in magnitude
         self.max_tendon_torque_cmd = MAX_TENDON_TORQUE_CMD
 
         # Derived quantities
@@ -226,23 +233,22 @@ class MujocoImuNode(Node):
     # Helper: apply upright/flipped pose based on START_FLIPPED
     # ------------------------------------------------------------
     def _apply_start_pose_flag(self) -> None:
+        # In planar x-z + pitch-about-y, flipped means pitch = pi.
         if START_FLIPPED:
-            quat = np.array([0.0, 1.0, 0.0, 0.0], dtype=self.data.qpos.dtype)  # 180 deg about X
+            pitch0 = np.pi
             z0 = FLIPPED_Z0
         else:
-            quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=self.data.qpos.dtype)  # upright
+            pitch0 = 0.0
             z0 = UPRIGHT_Z0
 
-        # Set base pose: [x y z qw qx qy qz]
-        self.data.qpos[self.free_qpos_adr + 0] = 0.0
-        self.data.qpos[self.free_qpos_adr + 1] = 0.0
-        self.data.qpos[self.free_qpos_adr + 2] = z0
-        self.data.qpos[self.free_qpos_adr + 3:self.free_qpos_adr + 7] = quat
+        self.data.qpos[self.root_x_qpos_adr] = 0.0
+        self.data.qpos[self.root_z_qpos_adr] = z0
+        self.data.qpos[self.root_pitch_qpos_adr] = pitch0
 
-        # Zero free-joint velocity
-        self.data.qvel[self.free_qvel_adr:self.free_qvel_adr + 6] = 0.0
+        self.data.qvel[self.root_x_dof_adr] = 0.0
+        self.data.qvel[self.root_z_dof_adr] = 0.0
+        self.data.qvel[self.root_pitch_dof_adr] = 0.0
 
-        # Zero wheel speeds
         for jname in ["j_fl", "j_fr", "j_rl", "j_rr"]:
             self.data.qvel[self.wheel_dof[jname]] = 0.0
 
@@ -280,7 +286,6 @@ class MujocoImuNode(Node):
 
         w_avg = self._avg_wheel_speed()
 
-        # Linear speed-dependent torque envelope
         speed_factor = max(0.0, 1.0 - abs(w_avg) / max(self.omega_wheel_nl, 1e-9))
         tau_drive = u * self.tau_drive_max * speed_factor
 
@@ -296,20 +301,15 @@ class MujocoImuNode(Node):
         w_avg = self._avg_wheel_speed()
         omega_motor = self.final_drive * w_avg
 
-        # Neutral
         if abs(u) < self.neutral_deadband:
             I_cmd = 0.0
-
         else:
             if self.esc_mode == "bidirectional":
-                # Immediate forward/reverse drive
                 V_cmd = u * self.V_bat_oc
                 I_cmd = (V_cmd - self.Ke * omega_motor) / max(self.R_total, 1e-9)
                 I_cmd = float(np.clip(I_cmd, -self.I_drive_max, self.I_drive_max))
 
             elif self.esc_mode == "forward_brake_reverse":
-                # Approximate RC ESC behavior:
-                # reverse stick while still moving forward acts as braking first
                 if u < -self.neutral_deadband and w_avg > self.brake_speed_thresh:
                     I_cmd = -abs(u) * self.I_brake_max
                 elif u > self.neutral_deadband and w_avg < -self.brake_speed_thresh:
@@ -324,7 +324,6 @@ class MujocoImuNode(Node):
         tau_motor = self.Kt * I_cmd
         tau_drive = self.eta_drive * self.final_drive * tau_motor
 
-        # Passive wheel/driveline drag at output side
         tau_drag = self._wheel_side_drag_torque(w_avg)
 
         tau_out = tau_drive - tau_drag
@@ -361,7 +360,7 @@ class MujocoImuNode(Node):
         self._apply_start_pose_flag()
 
         response.success = True
-        response.message = f"Car reset in MuJoCo (START_FLIPPED={START_FLIPPED})"
+        response.message = f"Car reset in MuJoCo planar mode (START_FLIPPED={START_FLIPPED})"
         self.get_logger().info(response.message)
         return response
 
@@ -391,7 +390,9 @@ class MujocoImuNode(Node):
         self.pub_obs_pose.publish(msg)
 
     def _publish_imu(self, stamp):
-        qw, qx, qy, qz = self.data.qpos[self.qadr:self.qadr + 4]
+        # Publish chassis body orientation as base_link orientation.
+        # If imu_site later gets its own rotation, you may want site orientation instead.
+        qw, qx, qy, qz = self.data.xquat[self.chassis_body_id]
         gyro = self.data.sensordata[self.gyro_adr:self.gyro_adr + self.gyro_dim]
         acc = self.data.sensordata[self.acc_adr:self.acc_adr + self.acc_dim]
 
@@ -421,10 +422,23 @@ class MujocoImuNode(Node):
         self.pub_imu.publish(imu_msg)
 
     def _publish_odom(self, stamp):
-        x, y, z = self.data.qpos[self.free_qpos_adr:self.free_qpos_adr + 3]
-        qw, qx, qy, qz = self.data.qpos[self.free_qpos_adr + 3:self.free_qpos_adr + 7]
+        # Body world pose
+        x, y, z = self.data.xpos[self.chassis_body_id]
+        qw, qx, qy, qz = self.data.xquat[self.chassis_body_id]
 
-        vx, vy, vz, wx, wy, wz = self.data.qvel[self.free_qvel_adr:self.free_qvel_adr + 6]
+        # Accurate body-centered velocity from MuJoCo
+        # res = [wx wy wz vx vy vz] when using world orientation (flg_local=0)
+        vel6 = np.zeros(6, dtype=np.float64)
+        mj.mj_objectVelocity(
+            self.model,
+            self.data,
+            mj.mjtObj.mjOBJ_BODY,
+            self.chassis_body_id,
+            vel6,
+            0,   # 0 => world-oriented
+        )
+
+        wx, wy, wz, vx, vy, vz = vel6
 
         odom = Odometry()
         odom.header.stamp = stamp

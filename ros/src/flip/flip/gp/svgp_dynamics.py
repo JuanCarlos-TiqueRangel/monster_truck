@@ -422,7 +422,6 @@ class SVGPManager:
     #     return mean, var
 
 
-    # in SVGPManager
     @torch.inference_mode()
     def predict_mean_torch(self, X: torch.Tensor) -> torch.Tensor:
         """
