@@ -27,30 +27,50 @@ def quat_to_R_and_pitch(qw, qx, qy, qz):
 
 
 @staticmethod
-def quat_to_euler_xyz(w, x, y, z):
-    """
-    Convert quaternion (w, x, y, z) to Euler angles (roll, pitch, yaw)
-    using the roll-pitch-yaw convention (XYZ intrinsic).
-    
-    Returns: (roll, pitch, yaw) in radians
-    """
-    # Roll (x-axis rotation)
+def quat_to_euler_xyz(w, x, y, z, wx, wy, wz):
+    # normalize quaternion
+    n = math.sqrt(w*w + x*x + y*y + z*z)
+    if n == 0.0:
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    w /= n
+    x /= n
+    y /= n
+    z /= n
+
+    # Roll
     sinr_cosp = 2.0 * (w * x + y * z)
     cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
     roll = math.atan2(sinr_cosp, cosr_cosp)
 
-    # Pitch (y-axis rotation)
+    # Pitch
     sinp = 2.0 * (w * y - z * x)
-    # Clamp to handle numerical drift outside [-1, 1]
     sinp = max(-1.0, min(1.0, sinp))
     pitch = math.asin(sinp)
 
-    # Yaw (z-axis rotation)
+    # Yaw
     siny_cosp = 2.0 * (w * z + x * y)
     cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
     yaw = math.atan2(siny_cosp, cosy_cosp)
 
-    return roll, pitch, yaw
+    p = wx
+    q = wy
+    r = wz
+
+    cr = math.cos(roll)
+    sr = math.sin(roll)
+    cp = math.cos(pitch)
+
+    eps = 1e-8
+    if abs(cp) < eps:
+        cp = eps if cp >= 0.0 else -eps
+
+    tp = math.sin(pitch) / cp
+
+    roll_dot  = p + q * sr * tp + r * cr * tp
+    pitch_dot = q * cr - r * sr
+    yaw_dot   = (q * sr + r * cr) / cp
+
+    return roll, pitch, yaw, roll_dot, pitch_dot, yaw_dot
 
 
 @staticmethod

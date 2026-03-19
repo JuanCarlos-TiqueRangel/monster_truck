@@ -13,52 +13,52 @@ from gp.svgp_dynamics import SVGPManager
 # ------------------------------------------------------------
 # Build (X, y) derivative dataset from logged trajectories
 # ------------------------------------------------------------
-def build_derivative_dataset(flip, rate, x, vx, u, ep, dt: float):
+def build_derivative_dataset(pitch, pitch_dot, xpos, xpos_dot, u, ep, dt: float):
     """
-    X_t = [x, vx, flip, rate, u] at t
+    X_t = [xpos, xpos_dot, pitch, pitch_dot, u] at t
     y = (next - current)/dt  (only within same episode)
     """
-    if len(flip) < 2:
+    if len(pitch) < 2:
         return None
 
     same_ep = (ep[:-1] == ep[1:])
 
-    x0    = x[:-1][same_ep]
-    vx0   = vx[:-1][same_ep]
-    flip0 = flip[:-1][same_ep]
-    rate0 = rate[:-1][same_ep]
+    xpos0    = xpos[:-1][same_ep]
+    xpos_dot0   = xpos_dot[:-1][same_ep]
+    pitch0 = pitch[:-1][same_ep]
+    pitch_dot0 = pitch_dot[:-1][same_ep]
     u0    = u[:-1][same_ep]
 
-    x1    = x[1:][same_ep]
-    vx1   = vx[1:][same_ep]
-    flip1 = flip[1:][same_ep]
-    rate1 = rate[1:][same_ep]
+    xpos1    = xpos[1:][same_ep]
+    xpos_dot1   = xpos_dot[1:][same_ep]
+    pitch1 = pitch[1:][same_ep]
+    pitch_dot1 = pitch_dot[1:][same_ep]
 
-    X = np.stack([x0, vx0, flip0, rate0, u0], axis=1).astype(np.float32)
+    X = np.stack([xpos0, xpos_dot0, pitch0, pitch_dot0, u0], axis=1).astype(np.float32)
 
-    y_dx    = ((x1    - x0)    / dt).astype(np.float32)
-    y_dvx   = ((vx1   - vx0)   / dt).astype(np.float32)
-    y_dflip = ((flip1 - flip0) / dt).astype(np.float32)
-    y_drate = ((rate1 - rate0) / dt).astype(np.float32)
+    y_dxpos    = ((xpos1    - xpos0)    / dt).astype(np.float32)
+    y_dxpos_dot   = ((xpos_dot1   - xpos_dot0)   / dt).astype(np.float32)
+    y_dpitch = ((pitch1 - pitch0) / dt).astype(np.float32)
+    y_dpitch_dot = ((pitch_dot1 - pitch_dot0) / dt).astype(np.float32)
 
     # Drop non-finite
     finite = (
         np.isfinite(X).all(axis=1)
-        & np.isfinite(y_dx)
-        & np.isfinite(y_dvx)
-        & np.isfinite(y_dflip)
-        & np.isfinite(y_drate)
+        & np.isfinite(y_dxpos)
+        & np.isfinite(y_dxpos_dot)
+        & np.isfinite(y_dpitch)
+        & np.isfinite(y_dpitch_dot)
     )
     X = X[finite]
-    y_dx = y_dx[finite]
-    y_dvx = y_dvx[finite]
-    y_dflip = y_dflip[finite]
-    y_drate = y_drate[finite]
+    y_dxpos = y_dxpos[finite]
+    y_dxpos_dot = y_dxpos_dot[finite]
+    y_dpitch = y_dpitch[finite]
+    y_dpitch_dot = y_dpitch_dot[finite]
 
     if X.shape[0] == 0:
         return None
 
-    return X, y_dx, y_dvx, y_dflip, y_drate
+    return X, y_dxpos, y_dxpos_dot, y_dpitch, y_dpitch_dot
 
 # -----------------------------
 # Robust access to variational params
@@ -291,12 +291,12 @@ class OSGPRTrainableZRetrainManager:
                     self.logger.info("Not enough new data since last train; skipping.")
                 return False
 
-        flip, rate, x, vx, u, ep = dataset.snapshot()
-        dataset.save_npz(episode_id, flip, rate, x, vx, u, ep)
+        pitch, pitch_dot, xpos, xpos_dot, u, ep = dataset.snapshot()
+        dataset.save_npz(episode_id, pitch, pitch_dot, xpos, xpos_dot, u, ep)
 
         # cap to a stable window
         M = int(self.cfg.max_points_for_train)
-        flip, rate, x, vx, u, ep = dataset.cap_window(M, flip, rate, x, vx, u, ep)
+        pitch, pitch_dot, xpos, xpos_dot, u, ep = dataset.cap_window(M, pitch, pitch_dot, xpos, xpos_dot, u, ep)
 
         # build “new chunk” slice so we train only on new points since last train
         if force:
@@ -305,10 +305,10 @@ class OSGPRTrainableZRetrainManager:
             # include one extra sample before the new chunk for derivative pairing
             start_idx = max(0, int(self.last_train_size) - 1)
 
-        flip_c = flip[start_idx:]
-        rate_c = rate[start_idx:]
-        x_c    = x[start_idx:]
-        vx_c   = vx[start_idx:]
+        pitch_c = pitch[start_idx:]
+        pitch_dot_c = pitch_dot[start_idx:]
+        xpos_c    = xpos[start_idx:]
+        xpos_dot_c   = xpos_dot[start_idx:]
         u_c    = u[start_idx:]
         ep_c   = ep[start_idx:]
 
@@ -317,7 +317,7 @@ class OSGPRTrainableZRetrainManager:
 
         self.train_thread = threading.Thread(
             target=self._train_worker,
-            args=(flip_c, rate_c, x_c, vx_c, u_c, ep_c, n_at_start),
+            args=(pitch_c, pitch_dot_c, xpos_c, xpos_dot_c, u_c, ep_c, n_at_start),
             daemon=True,
         )
         self.train_thread.start()
@@ -328,30 +328,30 @@ class OSGPRTrainableZRetrainManager:
             )
         return True
 
-    def _train_worker(self, flip, rate, x, vx, u, ep, n_at_start: int):
+    def _train_worker(self, pitch, pitch_dot, xpos, xpos_dot, u, ep, n_at_start: int):
         t0 = time.perf_counter()
         dt = float(self.cfg.ctrl_dt)
 
-        built = build_derivative_dataset(flip, rate, x, vx, u, ep, dt)
+        built = build_derivative_dataset(pitch, pitch_dot, xpos, xpos_dot, u, ep, dt)
         if built is None:
             if self.logger:
                 self.logger.warn("OSGPR(trainableZ): not enough valid consecutive samples to build derivative dataset.")
             self.training = False
             return
 
-        X, y_dx, y_dvx, y_dflip, y_drate = built
+        X, y_dxpos, y_dxpos_dot, y_dpitch, y_dpitch_dot = built
 
-        paths = [self.cfg.gp_pos_x_path, self.cfg.gp_vx_path, self.cfg.gp_flip_path, self.cfg.gp_rate_path]
+        paths = [self.cfg.gp_xpos_path, self.cfg.gp_xpos_dot_path, self.cfg.gp_pitch_path, self.cfg.gp_pitch_dot_path]
 
         try:
-            gp_pose_x = SVGPManager.load(paths[0], device=self.device)
-            gp_vx     = SVGPManager.load(paths[1], device=self.device)
-            gp_flip   = SVGPManager.load(paths[2], device=self.device)
-            gp_rate   = SVGPManager.load(paths[3], device=self.device)
+            gp_xpos = SVGPManager.load(paths[0], device=self.device)
+            gp_xpos_dot     = SVGPManager.load(paths[1], device=self.device)
+            gp_pitch   = SVGPManager.load(paths[2], device=self.device)
+            gp_pitch_dot   = SVGPManager.load(paths[3], device=self.device)
 
             # streaming updates (trainable Z)
             osgpr_trainablez_stream_update(
-                gp_pose_x, X, y_dx,
+                gp_xpos, X, y_dxpos,
                 steps=int(self.cfg.osgpr_steps),
                 batch_size=int(self.cfg.osgpr_batch_size),
                 lr_theta=float(self.cfg.osgpr_lr_theta),
@@ -361,7 +361,7 @@ class OSGPRTrainableZRetrainManager:
                 freeze_hypers=bool(self.cfg.osgpr_freeze_hypers),
             )
             osgpr_trainablez_stream_update(
-                gp_vx, X, y_dvx,
+                gp_xpos_dot, X, y_dxpos_dot,
                 steps=int(self.cfg.osgpr_steps),
                 batch_size=int(self.cfg.osgpr_batch_size),
                 lr_theta=float(self.cfg.osgpr_lr_theta),
@@ -371,7 +371,7 @@ class OSGPRTrainableZRetrainManager:
                 freeze_hypers=bool(self.cfg.osgpr_freeze_hypers),
             )
             osgpr_trainablez_stream_update(
-                gp_flip, X, y_dflip,
+                gp_pitch, X, y_dpitch,
                 steps=int(self.cfg.osgpr_steps),
                 batch_size=int(self.cfg.osgpr_batch_size),
                 lr_theta=float(self.cfg.osgpr_lr_theta),
@@ -381,7 +381,7 @@ class OSGPRTrainableZRetrainManager:
                 freeze_hypers=bool(self.cfg.osgpr_freeze_hypers),
             )
             osgpr_trainablez_stream_update(
-                gp_rate, X, y_drate,
+                gp_pitch_dot, X, y_dpitch_dot,
                 steps=int(self.cfg.osgpr_steps),
                 batch_size=int(self.cfg.osgpr_batch_size),
                 lr_theta=float(self.cfg.osgpr_lr_theta),
@@ -392,7 +392,7 @@ class OSGPRTrainableZRetrainManager:
             )
 
             # atomic save
-            for gp, out_path in zip([gp_pose_x, gp_vx, gp_flip, gp_rate], paths):
+            for gp, out_path in zip([gp_xpos, gp_xpos_dot, gp_pitch, gp_pitch_dot], paths):
                 os.makedirs(os.path.dirname(out_path), exist_ok=True)
                 tmp_path = out_path + ".tmp"
                 gp.save(tmp_path)
@@ -423,13 +423,13 @@ class OSGPRTrainableZRetrainManager:
             return None
 
         with self.model_lock:
-            gp_flip   = SVGPManager.load(self.cfg.gp_flip_path, device=self.device)
-            gp_rate   = SVGPManager.load(self.cfg.gp_rate_path, device=self.device)
-            gp_pose_x = SVGPManager.load(self.cfg.gp_pos_x_path, device=self.device)
-            gp_vx     = SVGPManager.load(self.cfg.gp_vx_path, device=self.device)
+            gp_pitch   = SVGPManager.load(self.cfg.gp_pitch_path, device=self.device)
+            gp_pitch_dot   = SVGPManager.load(self.cfg.gp_pitch_dot_path, device=self.device)
+            gp_xpos = SVGPManager.load(self.cfg.gp_xpos_path, device=self.device)
+            gp_xpos_dot     = SVGPManager.load(self.cfg.gp_xpos_dot_path, device=self.device)
 
         self.reload_pending = False
         if self.logger:
             self.logger.info("Reloaded SVGP models after OSGPR(trainableZ) update (hot swap).")
 
-        return gp_pose_x, gp_vx, gp_flip, gp_rate
+        return gp_xpos, gp_xpos_dot, gp_pitch, gp_pitch_dot

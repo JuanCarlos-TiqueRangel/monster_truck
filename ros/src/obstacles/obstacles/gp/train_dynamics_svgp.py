@@ -18,6 +18,11 @@ from typing import Dict, List, Tuple
 import numpy as np
 import torch
 
+from pathlib import Path
+import sys
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+from config.config_loader import cfg_params
+
 from svgp_dynamics import SVGPManager
 
 
@@ -32,7 +37,7 @@ class TrainSVGPConfig:
     input_keys: List[str]
     output_keys: List[str]
 
-    target_mode: str = "derivative"   # "derivative" | "delta" | "next"
+    target_mode: str = cfg_params.gp.type_of_data   # "derivative" | "delta" | "next"
     N_target: int | None = None       # None -> use all
     seed: int = 123
 
@@ -239,27 +244,28 @@ if __name__ == "__main__":
     obstacles_dir = script_dir.parent                   # obstacles
 
     # file names mujoco_manual_run_flip, mujoco_manual_wheelie, mujoco_manual_run_svgp, mujoco_manual_run_obs
-    npz = obstacles_dir / "data" / "mujoco_manual_run_obs.npz"
+    npz_file = cfg_params.files.ini_data_file
+    npz = obstacles_dir / "data" / npz_file
 
-    input_  = ["x_pose", "linear_speed_x", "flip", "rate", "u"]
-    output_ = ["x_pose", "linear_speed_x", "flip", "rate"]
+    input_  = ["xpos", "xpos_dot", "pitch", "pitch_dot", "u"]
+    output_ = ["xpos", "xpos_dot", "pitch", "pitch_dot"]
 
-    mode = "derivative"  # derivative | delta | next
+    mode = cfg_params.gp.type_of_data  # derivative | delta | next
 
     cfg = TrainSVGPConfig(
         npz_path=str(npz),
-        dt=0.1,
+        dt=cfg_params.gp.sample_time_dt,
         input_keys=input_,
         output_keys=output_,
         target_mode=mode,
         N_target=1000,
         seed=123,
 
-        kernel="RQ",
+        kernel=cfg_params.gp.kernel,
         iters=300,
         lr=0.01,
-        batch_size=256,
-        num_inducing=256,
+        batch_size=cfg_params.gp.batch_size,
+        num_inducing=cfg_params.gp.num_inducing,
         learn_inducing_locations=True,
         freeze_norm=True,
         device="cuda",

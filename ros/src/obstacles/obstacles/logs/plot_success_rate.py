@@ -1,62 +1,47 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-import numpy as np
 
-# 1. Load your real data from the CSV
-try:
-    df = pd.read_csv('episode_metrics.csv')
-    episodes = df.iloc[:, 0]    
-    base_time = df.iloc[:, 1]   
-except FileNotFoundError:
-    print("Error: 'episode_metrics.csv' not found. Please check your file path.")
+csv_path = "episode_metrics.csv"
+rolling_window = 5
 
-# ==========================================
-# 2. SMOOTH THE DATA (Rolling Average)
-# ==========================================
-window_size = 10  # <-- INCREASE this number (e.g., 10 or 20) to make it even smoother!
+df = pd.read_csv(csv_path)
 
-# Apply rolling average to the base data
-smoothed_base_time = base_time.rolling(window=window_size, min_periods=1).mean()
+data = pd.DataFrame({
+    "episode": pd.to_numeric(df.iloc[:, 0], errors="coerce"),
+    "success": pd.to_numeric(df.iloc[:, -1], errors="coerce")
+}).dropna()
 
+data = data[data["success"].isin([0, 1])].copy()
+data["success"] = data["success"].astype(int)
+data = data.sort_values("episode").reset_index(drop=True)
 
-# 3. Setup the Plotting Style
-plt.style.use('seaborn-v0_8-whitegrid')
-fig, axes = plt.subplots(1, 3, figsize=(15, 5), sharey=True)
+data["rolling_success_rate"] = data["success"].rolling(rolling_window, min_periods=1).mean()
+data["cumulative_success_rate"] = data["success"].expanding().mean()
 
-tasks = ['Flip', 'Wheelie', 'Obstacles']
+fig, ax = plt.subplots(figsize=(12, 5))
 
-# 4. Plotting Loop
-for i, task in enumerate(tasks):
-    ax = axes[i]
-    
-    offset = i * 8  
-    
-    np.random.seed(42 + i) 
-    # Generate the noise, and then smooth the noise too so the shaded area is also smooth
-    raw_noise = np.abs(np.random.normal(loc=1.5, scale=1.0, size=len(smoothed_base_time)))
-    smoothed_noise = pd.Series(raw_noise).rolling(window=window_size, min_periods=1).mean()
-    
-    # Apply the offset to your SMOOTHED data
-    task_mean_time = smoothed_base_time + offset
-    
-    # Plot the smoothed main line
-    ax.plot(episodes, task_mean_time, color='#1f77b4', linewidth=2, linestyle='-')
-    
-    # Plot the smoothed shaded area
-    ax.fill_between(episodes, 
-                    task_mean_time - smoothed_noise, 
-                    task_mean_time + smoothed_noise, 
-                    color='#1f77b4', alpha=0.3)
+# ax.plot(data["episode"], data["rolling_success_rate"], linewidth=2,
+#         label=f"Rolling success rate ({rolling_window} episodes)")
+ax.plot(data["episode"], data["cumulative_success_rate"], linewidth=2,
+        linestyle="--", label="Cumulative success rate")
 
-    # Formatting
-    ax.set_title(task, fontsize=14, fontweight='bold')
-    ax.set_xlabel('episodes')
-    
-    if i == 0:
-        ax.set_ylabel('time (s)')
-    
-    ax.set_xlim(left=episodes.min(), right=episodes.max())
-    ax.grid(True, linestyle='-', alpha=0.6)
+success_points = data[data["success"] == 1]
+fail_points = data[data["success"] == 0]
 
+ax.scatter(success_points["episode"], success_points["success"],
+           s=18, alpha=0.5, label="Success episodes")
+ax.scatter(fail_points["episode"], fail_points["success"],
+           s=18, alpha=0.25, label="Failure episodes")
+
+ax.set_title("Success Rate Across Episodes")
+ax.set_xlabel("Episode")
+ax.set_ylabel("Rate / Outcome")
+ax.set_ylim(-0.05, 1.05)
+ax.grid(True, alpha=0.3)
+ax.legend()
 plt.tight_layout()
+
+plt.savefig("success_rate_plot.png", dpi=200, bbox_inches="tight")
 plt.show()
+
+print(f"Overall success rate: {data['success'].mean():.2%}")
