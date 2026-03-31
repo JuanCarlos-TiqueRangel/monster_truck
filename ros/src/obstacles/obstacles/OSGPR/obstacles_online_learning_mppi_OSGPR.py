@@ -131,6 +131,22 @@ class MPPIConfig:
 
     backward_reset_dist: float = 3.0   # meters (if car goes this far backward from start -> reset)
 
+    # PALSGP config
+    # --- PALSGP-lite ---
+    gp_target_mode: str = "delta"
+    palsgp_use_local: bool = True
+    palsgp_local_selector: str = "nearest"
+
+    local_num_inducing: int = 48
+    anchor_num_inducing: int = 12
+
+    online_train_inducing: bool = False
+    local_use_uncertainty: bool = False
+
+    eps_loc: float = 1e-5
+    cholesky_float64: bool = True
+
+
 
 
 # ============================================================
@@ -143,7 +159,7 @@ class MPPICarControllerNode(Node):
         self.cfg = cfg
 
         # ----- Device -----
-        self.device = torch.device("cuda")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.get_logger().info(f"Using torch device: {self.device}")
 
         # ----- Load SVGP models -----
@@ -213,7 +229,9 @@ class MPPICarControllerNode(Node):
             gp_pitch_dot=self.gp_pitch_dot,
             model_lock=self.model_lock,
             logger=self.get_logger(),
+            feature_map_torch=self.feature_map_torch,   # NEW
         )
+
 
         # Dataset buffer
         self.episode_id: int = 0
@@ -230,7 +248,9 @@ class MPPICarControllerNode(Node):
             device=self.device,
             model_lock=self.model_lock,
             logger=self.get_logger(),
+            feature_map_torch=self.feature_map_torch,   # NEW
         )
+
         self.reset_after_retrain = False
 
         # Episode timing metrics
@@ -269,33 +289,18 @@ class MPPICarControllerNode(Node):
                 self.episode_x_start = float(self.xpos)
 
 
+    def feature_map_torch(self, s: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        """
+        GP feature map φ(s,u). Default 5D: [x, xdot, pitch, pitch_dot, u].
+        """
+        xpos = s[:, 0]
+        xdot = s[:, 1]
+        pitch = s[:, 2]
+        pitch_dot = s[:, 3]
+        uu = u[:, 0]
+        return torch.stack([xpos, xdot, pitch, pitch_dot, uu], dim=-1)
 
-    def imu_cb(self, msg: Imu):
-        stamp = msg.header.stamp
-        t = stamp.sec + stamp.nanosec * 1e-9
 
-        if self.t0_sim is None:
-            self.t0_sim = t
-        self.latest_t_sim = float(t - self.t0_sim)
-
-        qw = float(msg.orientation.w)
-        qx = float(msg.orientation.x)
-        qy = float(msg.orientation.y)
-        qz = float(msg.orientation.z)
-
-        # fixed bug: use x, y, z correctly
-        wx = float(msg.angular_velocity.x)
-        wy = float(msg.angular_velocity.y)
-        wz = float(msg.angular_velocity.z)
-
-        (self.roll, 
-        self.pitch, 
-        self.yaw, 
-        self.roll_dot, 
-        self.pitch_dot, 
-        self.yaw_dot) = geometry.quat_to_euler_xyz(qw, qx, qy, qz, wx, wy, wz)
-
-        self.have_imu = True
 
     # ========================================================
     # ROS callbacks
@@ -399,6 +404,7 @@ class MPPICarControllerNode(Node):
             self.publish_u(0.0)
 
             loaded = self.retrain.reload_models_if_ready()
+            self.mppi.local_dirty = True
             if loaded is not None:
                 gp_xpos, gp_xpos_dot, gp_pitch, gp_pitch_dot = loaded
                 self.gp_xpos, self.gp_xpos_dot, self.gp_pitch, self.gp_pitch_dot = gp_xpos, gp_xpos_dot, gp_pitch, gp_pitch_dot

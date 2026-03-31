@@ -260,7 +260,6 @@ if __name__ == "__main__":
         target_mode=mode,
         N_target=1000,
         seed=123,
-
         kernel=cfg_params.gp.kernel,
         iters=300,
         lr=0.01,
@@ -269,7 +268,6 @@ if __name__ == "__main__":
         learn_inducing_locations=True,
         freeze_norm=True,
         device="cuda",
-
         out_dir="models",
         prefix="svgp_dynamics",
         store_train_data_in_ckpt=True,

@@ -3,16 +3,21 @@
 files:
     mujoco_model: "planar_monstertruck.xml"
     ini_data_file: "mujoco_random_obstacles.npz"
+    # ini_data_file: "dataset_ep0462.npz"
 
 models: 
-    xpos: "svgp_dynamics_xpos_d_dt.pt"
-    xpos_dot: "svgp_dynamics_xpos_dot_d_dt.pt"
-    pitch: "svgp_dynamics_pitch_d_dt.pt"
-    pitch_dot: "svgp_dynamics_pitch_dot_d_dt.pt"
+    # xpos: "svgp_dynamics_xpos_d_dt.pt"
+    # xpos_dot: "svgp_dynamics_xpos_dot_d_dt.pt"
+    # pitch: "svgp_dynamics_pitch_d_dt.pt"
+    # pitch_dot: "svgp_dynamics_pitch_dot_d_dt.pt"
+    xpos: "svgp_dynamics_xpos_delta.pt"
+    xpos_dot: "svgp_dynamics_xpos_dot_delta.pt"
+    pitch: "svgp_dynamics_pitch_delta.pt"
+    pitch_dot: "svgp_dynamics_pitch_dot_delta.pt"
 
 gp:
     sample_time_dt: 0.1
-    type_of_data: "derivative"
+    type_of_data: "delta"
     kernel: "RBF"
-    batch_size: 256
-    num_inducing: 256
+    batch_size: 1000
+    num_inducing: 1000

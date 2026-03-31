@@ -26,6 +26,7 @@ class SVGPModel(gpytorch.models.ApproximateGP):
             inducing_points,
             variational_distribution,
             learn_inducing_locations=learn_inducing_locations,
+            jitter_val=1e-3,  # stabilize Kzz cholesky in variational strategy
         )
         super().__init__(variational_strategy)
 
@@ -139,6 +140,90 @@ class SVGPManager:
         # Warm-start training objects (persist across updates)
         self.optimizer: torch.optim.Optimizer | None = None
         self.elbo: gpytorch.mlls.VariationalELBO | None = None
+
+
+    def to_device(self, device: torch.device) -> None:
+        """
+        Move model + normalization stats to a target device.
+        """
+        self.device = device
+        if self.model is not None:
+            self.model.to(device)
+        if self.likelihood is not None:
+            self.likelihood.to(device)
+        for name in ("X_train", "Y_train", "X_mean", "X_std", "Y_mean", "Y_std"):
+            v = getattr(self, name, None)
+            if torch.is_tensor(v):
+                setattr(self, name, v.to(device))
+
+
+    def set_inducing_trainable(self, trainable: bool) -> None:
+        """
+        Enable/disable gradients for inducing point locations.
+        Recommended:
+        - trainable=False during online streaming updates (stability).
+        - trainable=True only during slow refit stages.
+        """
+        if self.model is None:
+            return
+        Z = self.model.variational_strategy.inducing_points
+        if isinstance(Z, torch.nn.Parameter):
+            Z.requires_grad_(bool(trainable))
+
+
+    @torch.no_grad()
+    def get_inducing_points_normalized(self) -> torch.Tensor:
+        """
+        Return inducing points in normalized input space: [M, D].
+        """
+        if self.model is None:
+            raise RuntimeError("Model not initialized.")
+        return self.model.variational_strategy.inducing_points.detach()
+
+
+    @torch.no_grad()
+    def predict_latent_mean_var_normalized(self, Xn: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Predict latent mean/variance in normalized output space given normalized inputs Xn.
+        """
+        if self.model is None:
+            raise RuntimeError("Model not initialized.")
+        if Xn.device != self.device:
+            Xn = Xn.to(self.device, non_blocking=True)
+        if Xn.dtype != torch.float32:
+            Xn = Xn.float()
+
+        self.model.eval()
+        if self.likelihood is not None:
+            self.likelihood.eval()
+
+        with gpytorch.settings.fast_pred_var():
+            out = self.model(Xn)
+            return out.mean, out.variance
+
+
+    @torch.no_grad()
+    def kernel_dense_normalized(self, A_n: torch.Tensor, B_n: torch.Tensor) -> torch.Tensor:
+        """
+        Dense kernel matrix K(A_n, B_n) in normalized input space.
+        """
+        if self.model is None:
+            raise RuntimeError("Model not initialized.")
+        return self.model.covar_module(A_n, B_n).to_dense()
+
+
+    @torch.no_grad()
+    def kernel_diag_normalized(self, Xn: torch.Tensor) -> torch.Tensor:
+        """
+        Diagonal k(x,x) for normalized inputs Xn.
+        """
+        if self.model is None:
+            raise RuntimeError("Model not initialized.")
+        Kxx = self.model.covar_module(Xn, Xn)
+        return Kxx.diagonal(dim1=-2, dim2=-1)
+
+
+
 
     # ----------------------------- #
     # FIT / RETRAIN entrypoints
@@ -405,21 +490,21 @@ class SVGPManager:
     # ----------------------------- #
     # PREDICT (same signature)
     # ----------------------------- #
-    # def predict_torch(self, X):
-    #     if not self.trained or self.model is None or self.likelihood is None:
-    #         raise RuntimeError("SVGP has not been trained yet.")
-    #     if self.X_mean is None or self.X_std is None or self.Y_mean is None or self.Y_std is None:
-    #         raise RuntimeError("Normalization stats missing.")
+    def predict_torch(self, X):
+        if not self.trained or self.model is None or self.likelihood is None:
+            raise RuntimeError("SVGP has not been trained yet.")
+        if self.X_mean is None or self.X_std is None or self.Y_mean is None or self.Y_std is None:
+            raise RuntimeError("Normalization stats missing.")
 
-    #     X = torch.as_tensor(X, dtype=torch.float32, device=self.device)
-    #     Xn = (X - self.X_mean) / self.X_std
+        X = torch.as_tensor(X, dtype=torch.float32, device=self.device)
+        Xn = (X - self.X_mean) / self.X_std
 
-    #     with torch.no_grad(), gpytorch.settings.fast_pred_var():
-    #         #pred = self.likelihood(self.model(Xn))
-    #         pred = self.model(Xn)
-    #         mean = pred.mean * self.Y_std + self.Y_mean
-    #         var = pred.variance * (self.Y_std ** 2)
-    #     return mean, var
+        with torch.no_grad(), gpytorch.settings.fast_pred_var():
+            #pred = self.likelihood(self.model(Xn))
+            pred = self.model(Xn)
+            mean = pred.mean * self.Y_std + self.Y_mean
+            var = pred.variance * (self.Y_std ** 2)
+        return mean, var
 
 
     @torch.inference_mode()
@@ -448,7 +533,56 @@ class SVGPManager:
         pred = self.model(Xn)
         mean = pred.mean * self.Y_std + self.Y_mean
         return mean
-    
+
+
+
+
+
+    @torch.no_grad()
+    def get_inducing_points_normalized(self) -> torch.Tensor:
+        if self.model is None:
+            raise RuntimeError("Model is not initialized.")
+        return self.model.variational_strategy.inducing_points.detach()
+
+    @torch.no_grad()
+    def predict_latent_mean_var_normalized(self, Xn: torch.Tensor):
+        if not self.trained or self.model is None:
+            raise RuntimeError("SVGP has not been trained yet.")
+        Xn = torch.as_tensor(Xn, dtype=torch.float32, device=self.device)
+        out = self.model(Xn)
+        return out.mean.detach(), out.variance.detach()
+
+    @torch.no_grad()
+    def predict_latent_mean_var(self, X: torch.Tensor):
+        if self.X_mean is None or self.X_std is None:
+            raise RuntimeError("Normalization stats missing.")
+        X = torch.as_tensor(X, dtype=torch.float32, device=self.device)
+        Xn = (X - self.X_mean) / self.X_std
+        return self.predict_latent_mean_var_normalized(Xn)
+
+    def kernel_zz_normalized(self, Za: torch.Tensor, Zb: torch.Tensor) -> torch.Tensor:
+        if self.model is None:
+            raise RuntimeError("Model is not initialized.")
+        Za = torch.as_tensor(Za, dtype=torch.float32, device=self.device)
+        Zb = torch.as_tensor(Zb, dtype=torch.float32, device=self.device)
+        return self.model.covar_module(Za, Zb).to_dense()
+
+    def kernel_diag_normalized(self, Xn: torch.Tensor) -> torch.Tensor:
+        if self.model is None:
+            raise RuntimeError("Model is not initialized.")
+        Xn = torch.as_tensor(Xn, dtype=torch.float32, device=self.device)
+        Kxx = self.model.covar_module(Xn, Xn).to_dense()
+        return torch.diagonal(Kxx, dim1=-2, dim2=-1)
+
+    def set_inducing_trainable(self, trainable: bool) -> None:
+        if self.model is None:
+            raise RuntimeError("Model is not initialized.")
+        Z = self.model.variational_strategy.inducing_points
+        if isinstance(Z, torch.nn.Parameter):
+            Z.requires_grad_(bool(trainable))
+
+
+
 
     
     # ----------------------------- #

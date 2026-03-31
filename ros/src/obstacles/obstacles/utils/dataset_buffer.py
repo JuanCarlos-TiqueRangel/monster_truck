@@ -21,6 +21,42 @@ class DatasetBuffer:
         self.log_u    = deque(maxlen=maxlen)
         self.log_ep   = deque(maxlen=maxlen)
 
+
+    def get_transition_pairs(self):
+        """
+        Return same-episode consecutive transition pairs.
+
+        Returns:
+            s0: np.ndarray [N,4]
+            u0: np.ndarray [N,1]
+            s1: np.ndarray [N,4]
+            ep0: np.ndarray [N]
+        """
+        pitch, pitch_dot, xpos, xpos_dot, u, ep = self.snapshot()
+        if len(pitch) < 2:
+            return None
+
+        same_ep = (ep[:-1] == ep[1:])
+        if not np.any(same_ep):
+            return None
+
+        s0 = np.stack(
+            [xpos[:-1][same_ep], xpos_dot[:-1][same_ep], pitch[:-1][same_ep], pitch_dot[:-1][same_ep]],
+            axis=1,
+        ).astype(np.float32)
+
+        s1 = np.stack(
+            [xpos[1:][same_ep], xpos_dot[1:][same_ep], pitch[1:][same_ep], pitch_dot[1:][same_ep]],
+            axis=1,
+        ).astype(np.float32)
+
+        u0 = u[:-1][same_ep].reshape(-1, 1).astype(np.float32)
+        ep0 = ep[:-1][same_ep].astype(np.int64)
+        return s0, u0, s1, ep0
+
+
+
+
     def n_points(self) -> int:
         with self.lock:
             return len(self.log_pitch)
