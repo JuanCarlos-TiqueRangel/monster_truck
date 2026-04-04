@@ -70,6 +70,43 @@ class DatasetBuffer:
             self.log_u.append(float(u))
             self.log_ep.append(int(episode_id))
 
+
+    def drop_episode(self, episode_id: int) -> int:
+        """
+        Remove all samples that belong to one episode.
+
+        Returns:
+            number of removed samples
+        """
+        with self.lock:
+            old_xpos = list(self.log_xpos)
+            old_xpos_dot = list(self.log_xpos_dot)
+            old_pitch = list(self.log_pitch)
+            old_pitch_dot = list(self.log_pitch_dot)
+            old_u = list(self.log_u)
+            old_ep = list(self.log_ep)
+
+            keep_idx = [i for i, ep in enumerate(old_ep) if ep != int(episode_id)]
+            removed = len(old_ep) - len(keep_idx)
+
+            if removed == 0:
+                return 0
+
+            maxlen = self.log_xpos.maxlen
+
+            self.log_xpos = deque((old_xpos[i] for i in keep_idx), maxlen=maxlen)
+            self.log_xpos_dot = deque((old_xpos_dot[i] for i in keep_idx), maxlen=maxlen)
+            self.log_pitch = deque((old_pitch[i] for i in keep_idx), maxlen=maxlen)
+            self.log_pitch_dot = deque((old_pitch_dot[i] for i in keep_idx), maxlen=maxlen)
+            self.log_u = deque((old_u[i] for i in keep_idx), maxlen=maxlen)
+            self.log_ep = deque((old_ep[i] for i in keep_idx), maxlen=maxlen)
+
+            if self.logger is not None:
+                self.logger.info(f"Dropped episode {episode_id} from dataset buffer ({removed} samples removed).")
+
+            return removed
+
+
     def snapshot(self):
         with self.lock:
             xpos    = np.asarray(list(self.log_xpos), dtype=np.float32)

@@ -60,8 +60,8 @@ class MPPIConfig:
     u_max: float = 1.0
 
     # Target / stop conditions
-    pitch_target: float = 1.39  # may still be used by external modules
-    pitch_stop_abs: float = 2.2
+    pitch_target: float = 1.0  # may still be used by external modules
+    pitch_stop_abs: float = 1.5
 
     # Paths to trained GP models
     gp_xpos_path: str = str(GP_DIR / "models" / cfg_params.models.xpos)
@@ -110,6 +110,8 @@ class MPPIConfig:
     w_goal: float = 3.0
     w_xpos_dot: float = 0.5
     v_des: float = 0.0
+
+    x_min_terminate: float = -3.0
 
     live_plot_mode: str = "both"
 
@@ -396,6 +398,23 @@ class MPPICarControllerNode(Node):
         if self.xpos is None:
             self.publish_u(0.0)
             return
+
+
+        # -------------------------------------------------
+        # Left boundary check (failure)
+        # -------------------------------------------------
+        if self.xpos <= float(cfg.x_min_terminate):
+            self.get_logger().warn(
+                f"Episode {int(self.episode_id)} terminated: "
+                f"xpos={self.xpos:.3f} m <= {cfg.x_min_terminate:.3f} m"
+            )
+            self.publish_u(0.0)
+
+            self.dataset.drop_episode(self.episode_id)
+
+            self.request_reset()
+            return
+
 
         # -------------------------------------------------
         # Goal check (success)
