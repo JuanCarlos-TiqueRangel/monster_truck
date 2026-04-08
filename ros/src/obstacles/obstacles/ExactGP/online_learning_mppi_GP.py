@@ -47,21 +47,25 @@ from utils.episode_metrics import EpisodeMetricsWriter
 @dataclass
 class MPPIConfig:
     # Timing
-    ctrl_dt: float = 0.1
-    horizon: int = 20
+    ctrl_dt: float = cfg_params.gp.sample_time_dt
+    horizon: int = 30
     num_rollouts: int = 2000
 
     # MPPI hyper-parameters
-    lambda_: float = 1.0
-    sigma: float = 1.6
+    lambda_: float = 500.0
+    # sigma: float = 1.6
+    sigma: float = 0.3
+
 
     # Action bounds
-    u_min: float = -1.0
+    u_min: float = 0.0
     u_max: float = 1.0
 
     # Target / stop conditions
+    goal_x: float = 5.0
     pitch_target: float = 1.0  # may still be used by external modules
     pitch_stop_abs: float = 1.5
+    roll_stop_abs: float = 1.2
 
     # Paths to trained GP models
     gp_xpos_path: str = str(GP_DIR / "models" / cfg_params.models.xpos)
@@ -75,8 +79,8 @@ class MPPIConfig:
 
     # ---- retrain ----
     min_points_to_train: int = 20
-    N_target_train: int = 1_000
-    train_kernel: str = "RQ"
+    N_target_train: int = 900
+    train_kernel: str = cfg_params.gp.kernel
     train_iters: int = 300
     max_points_for_train: int = 50_000
     min_new_points_between_trains: int = 20
@@ -85,7 +89,7 @@ class MPPIConfig:
     live_plot: bool = True
     live_plot_save_png: bool = True
 
-    episode_timeout_sec: float = 20.0   # hard timeout for an episode (s)
+    episode_timeout_sec: float = 60.0   # hard timeout for an episode (s)
 
     # ---- seed dataset (initial offline run) ----
     # Keep this path only if the referenced file exists in your project.
@@ -95,25 +99,26 @@ class MPPIConfig:
 
     retrain_every_episodes: int = 1   # or 20
 
-    # ---- weights ----
-    w_flat: float = 6.0
-    w_u: float = 100.1
-    w_pitch_dot: float = 2.0
-
-    # safety: prevent over-rotation
-    pitch_limit: float = 1.45
-    w_pitch_limit: float = 80.0
-
+    # ---- weights that worked with low obstacle ----
+    w_u: float = 7.1
+    w_du: float = 15.0
     w_pitch = 10.0
+    w_pitch_dot: float = 32.0
+    w_goal: float = 10.0
+    w_xpos_dot = 20.0
 
-    goal_x: float = 5.0
-    w_goal: float = 3.0
-    w_xpos_dot: float = 0.5
-    v_des: float = 0.0
+    # w_u: float = 200.1
+    # w_du: float = 105.0
+    # w_pitch = 10.0
+    # w_pitch_dot: float = 32.0
+    # w_goal: float = 10.0
+    # w_xpos_dot = 20.0
 
     x_min_terminate: float = -3.0
 
     live_plot_mode: str = "both"
+    just_gp_model: bool = True
+    stop_re_training_mode: bool = False
 
 
 # ============================================================
@@ -286,6 +291,8 @@ class MPPICarControllerNode(Node):
         c = self.mppi.stage_cost_torch(x0, u)  # (1,)
         c = float(c.item())
 
+        print("[DEBUG COST]: ", c)
+
         # optional: scale by dt to approximate integral
         # c *= float(self.cfg.ctrl_dt)
 
@@ -348,57 +355,17 @@ class MPPICarControllerNode(Node):
             self.publish_u(0.0)
             return
 
-        # -------------------------------------------------
-        # Episode timeout
-        # -------------------------------------------------
-        if self.episode_start_time is not None:
-            elapsed_ep = (self.get_clock().now() - self.episode_start_time).nanoseconds * 1e-9
-            if elapsed_ep >= float(cfg.episode_timeout_sec):
-                self.get_logger().warn(
-                    f"Episode {int(self.episode_id)} TIMEOUT after {elapsed_ep:.2f}s "
-                    f"(limit={cfg.episode_timeout_sec:.2f}s). Forcing reset."
-                )
 
-                self._record_episode_metric(retrain_started=True)
-                self.publish_u(0.0)
-                self.request_reset(force=True)
-                return
+        if self.dataset.n_points() < cfg.N_target_train and self.cfg.just_gp_model == False:
+            self.cfg.re_training_mode = True
+        else:
+            self.cfg.re_training_mode = False
 
-        # -------------------------------------------------
-        # Emergency stop: pitch exceeded limit
-        # -------------------------------------------------
-        if abs(pitch) >= float(cfg.pitch_stop_abs):
-            self.publish_u(0.0)
-
-            ep_num = self.episode_id + 1  # 1-based
-            do_retrain_now = (cfg.retrain_every_episodes > 0) and (ep_num % cfg.retrain_every_episodes == 0)
-
-            started = False
-            if do_retrain_now:
-                started = self.retrain.maybe_start_retrain_async(
-                    self.dataset, episode_id=self.episode_id, force=True
-                )
-            else:
-                self.get_logger().info(
-                    f"Skipping retrain this episode (ep_num={ep_num}). "
-                    f"retrain_every_episodes={cfg.retrain_every_episodes}"
-                )
-
-            self._record_episode_metric(retrain_started=started)
-
-            if started:
-                self.reset_after_retrain = True
-                return
-            else:
-                self.reset_after_retrain = False
-                self.request_reset()
-                return
 
         # Need x to proceed
         if self.xpos is None:
             self.publish_u(0.0)
             return
-
 
         # -------------------------------------------------
         # Left boundary check (failure)
@@ -419,26 +386,108 @@ class MPPICarControllerNode(Node):
         # -------------------------------------------------
         # Goal check (success)
         # -------------------------------------------------
-        if self.xpos >= float(cfg.goal_x):
-            self.publish_u(0.0)
+        if self.cfg.re_training_mode:
+            if self.xpos >= float(cfg.goal_x):
+                self.publish_u(0.0)
 
-            ep_num = self.episode_id + 1
-            do_retrain_now = (cfg.retrain_every_episodes > 0) and (ep_num % cfg.retrain_every_episodes == 0)
+                ep_num = self.episode_id + 1
+                do_retrain_now = (cfg.retrain_every_episodes > 0) and (ep_num % cfg.retrain_every_episodes == 0)
 
-            started = False
-            if do_retrain_now:
-                started = self.retrain.maybe_start_retrain_async(
-                    self.dataset, episode_id=self.episode_id, force=False
-                )
+                started = False
+                if do_retrain_now:
+                    started = self.retrain.maybe_start_retrain_async(
+                        self.dataset, episode_id=self.episode_id, force=False
+                    )
 
-            self._record_episode_metric(retrain_started=started)
+                self._record_episode_metric(retrain_started=started, success=1)
 
-            if started:
-                self.reset_after_retrain = True
-                return
-            else:
+                if started:
+                    self.reset_after_retrain = True
+                    return
+                else:
+                    self.request_reset()
+                    return
+        else:
+            if self.xpos >= float(cfg.goal_x):
+                print("[SUCCESS] !!!")
+                self.publish_u(0.0)
+
+                self.dataset.drop_episode(self.episode_id)
+                self._record_episode_metric(retrain_started=True, success=1)
                 self.request_reset()
                 return
+
+
+        # -------------------------------------------------
+        # Episode timeout
+        # -------------------------------------------------
+        if self.episode_start_time is not None:
+            elapsed_ep = (self.get_clock().now() - self.episode_start_time).nanoseconds * 1e-9
+            if elapsed_ep >= float(cfg.episode_timeout_sec):
+                self.get_logger().warn(
+                    f"Episode {int(self.episode_id)} TIMEOUT after {elapsed_ep:.2f}s "
+                    f"(limit={cfg.episode_timeout_sec:.2f}s). Forcing reset."
+                )
+
+                ep_num = self.episode_id + 1
+                do_retrain_now = (cfg.retrain_every_episodes > 0) and (ep_num % cfg.retrain_every_episodes == 0)
+
+                started = False
+                if do_retrain_now:
+                    started = self.retrain.maybe_start_retrain_async(
+                        self.dataset, episode_id=self.episode_id, force=True
+                    )
+
+                self._record_episode_metric(retrain_started=started, success=0)
+                self.publish_u(0.0)
+
+                if started:
+                    self.reset_after_retrain = True
+                    return
+
+                self.request_reset(force=True)
+                return
+
+        # -------------------------------------------------
+        # Emergency stop: car flipped or nearly flipped
+        # -------------------------------------------------
+        if self.cfg.re_training_mode:
+            if (abs(pitch) >= float(cfg.pitch_stop_abs)) or (abs(self.roll) >= float(cfg.roll_stop_abs)):
+                self.publish_u(0.0)
+
+                ep_num = self.episode_id + 1
+                do_retrain_now = (cfg.retrain_every_episodes > 0) and (ep_num % cfg.retrain_every_episodes == 0)
+
+                started = False
+                if do_retrain_now:
+                    started = self.retrain.maybe_start_retrain_async(self.dataset, episode_id=self.episode_id, force=True)
+                else:
+                    self.get_logger().info(
+                        f"Skipping retrain this episode (ep_num={ep_num}). retrain_every_episodes={cfg.retrain_every_episodes}"
+                    )
+
+                self._record_episode_metric(retrain_started=started, success=0)
+
+                if started:
+                    self.reset_after_retrain = True
+                    return
+                self.reset_after_retrain = False
+                self.request_reset()
+                return
+        else:
+            if (abs(pitch) >= float(cfg.pitch_stop_abs)) or (abs(self.roll) >= float(cfg.roll_stop_abs)):
+                self.get_logger().warn(
+                    f"Flip detected. roll={self.roll:.3f}, pitch={pitch:.3f}"
+                )
+                self.publish_u(0.0)
+
+                # remove this bad episode from training buffer
+                self.dataset.drop_episode(self.episode_id)
+
+                self._record_episode_metric(retrain_started=False, success=0)
+                self.request_reset()
+                return
+
 
         # -------------------------------------------------
         # MPPI (normal control)
@@ -484,10 +533,8 @@ class MPPICarControllerNode(Node):
             episode_id=int(self.episode_id),
         )
 
-    # ==========================
-    # Episode metric recording
-    # ==========================
-    def _record_episode_metric(self, retrain_started: bool):
+
+    def _record_episode_metric(self, retrain_started: bool, success: int):
         if self.episode_start_time is None:
             self.episode_started = False
             return
@@ -502,6 +549,7 @@ class MPPICarControllerNode(Node):
             time_to_goal_sec=float(dt),
             retrain_started=bool(retrain_started),
             cost=float(avg_cost),
+            success=success
         )
 
         self.episode_start_time = None

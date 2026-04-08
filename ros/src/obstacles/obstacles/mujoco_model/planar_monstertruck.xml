@@ -4,7 +4,7 @@
 
   <default>
     <geom contype="1" conaffinity="1"
-          friction="1.0 0.005 0.0002"
+          friction="2.0 0.005 0.0002"
           solref="0.015 1"
           solimp="0.95 0.99 0.002"
           density="1000"/>
@@ -17,20 +17,80 @@
   </visual>
 
   <worldbody>
-    <light name="sun" pos="0 0 100" dir="0 0 -1" diffuse="1 1 1"/>
-    <geom name="ground" type="plane" size="100 100 0.1" rgba="1 1 1 1"/>
+      <light name="sun" pos="0 0 100" dir="0 0 -1" diffuse="1 1 1"/>
+      <geom name="ground" type="plane" size="100 100 0.1" rgba="1 1 1 1"/>
 
-    <!-- obstacles -->
-    <geom name="obs_box_1" type="box"
-          pos="2.0 0.0 0.05"
-          size="0.30 0.30 0.10"
-          rgba="0.2 0.2 0.8 1"/>
+      <!-- obstacles single box-->
+      <!-- <geom name="obs_box_1" type="box"
+            pos="2.0 0.0 0.05"
+            size="0.30 0.30 0.05"
+            rgba="0.2 0.2 0.8 1"
+            friction="5.01 0.01 0.0005"/> -->
 
-    <geom name="pole_1" type="cylinder"
-          pos="6.0 0.0 0.05"
-          size="0.10 1.50"
-          euler="1.5708 0 0"
-          rgba="0.2 0.7 0.2 1"/>
+
+      <!-- obstacles higher box-->
+      <geom name="obs_box_1" type="box"
+            pos="2.0 0.0 0.1"
+            size="0.30 0.30 0.1"
+            rgba="0.2 0.2 0.8 1"
+            friction="5.01 0.01 0.0005"/>
+
+
+      <!-- obstacles rounded cilinders-->
+      <!-- <geom name="obs_box_1" type="box"
+            pos="2.0 0.0 0.05"
+            size="0.30 0.30 0.1"
+            rgba="0.2 0.2 0.8 1"
+            friction="5.01 0.01 0.0005"/>
+
+      <geom name="pole_box_1" type="cylinder"
+            pos="1.9 0.0 0.12"
+            size="0.10 0.30"
+            euler="1.5708 0 0"
+            rgba="0.2 0.7 0.2 1"
+            friction="5.01 0.01 0.0005"/>
+
+      <geom name="pole_box_2" type="cylinder"
+            pos="2.2 0.0 0.15"
+            size="0.10 0.3"
+            euler="1.5708 0 0"
+            rgba="0.2 0.7 0.2 1"
+            friction="5.01 0.01 0.0005"/> -->
+
+
+      <!-- obstacles boxes-->
+      <!-- <geom name="obs_box_1" type="box"
+            pos="2.0 0.0 0.03"
+            size="0.30 0.30 0.09"
+            rgba="0.2 0.2 0.8 1"
+            friction="5.01 0.01 0.0005"/>
+
+      <geom name="obs_box_2" type="box"
+            pos="2.2 0.15 0.09"
+            size="0.10 0.10 0.09"
+            rgba="0.4 0.2 0.8 1"
+            friction="7.01 0.01 0.0009"/>
+
+      <geom name="obs_box_3" type="box"
+            pos="1.8 -0.15 0.09"
+            size="0.10 0.10 0.09"
+            rgba="0.7 0.3 0.4 1"
+            friction="5.01 0.01 0.0007"/>
+
+      <geom name="obs_box_4" type="box"
+            pos="1.8 0.15 0.09"
+            size="0.10 0.10 0.09"
+            rgba="0.2 0.2 0.8 1"
+            friction="5.01 0.01 0.0005"/>  -->
+
+
+      <!-- Green bar at the end-->
+      <geom name="pole_1" type="cylinder"
+            pos="6.0 0.0 0.05"
+            size="0.10 1.50"
+            euler="1.5708 0 0"
+            rgba="0.2 0.7 0.2 1"
+            friction="5.01 0.01 0.0005"/>
 
     <!--
       Planar root: x-z translation + pitch about y
@@ -398,7 +458,7 @@
                 euler="1.5708 0 0"
                 rgba="0.08 0.08 0.08 1"
                 mass="0.425"
-                friction="1.8 0.005 0.0002"/>
+                friction="2.01 0.005 0.0002"/>
           <geom name="rim_fl" type="cylinder"
                 size="0.052 0.037"
                 euler="1.5708 0 0"
@@ -419,7 +479,7 @@
                 euler="1.5708 0 0"
                 rgba="0.08 0.08 0.08 1"
                 mass="0.425"
-                friction="1.8 0.005 0.0002"/>
+                friction="2.01 0.005 0.0002"/>
           <geom name="rim_fr" type="cylinder"
                 size="0.052 0.037"
                 euler="1.5708 0 0"
@@ -440,7 +500,7 @@
                 euler="1.5708 0 0"
                 rgba="0.08 0.08 0.08 1"
                 mass="0.425"
-                friction="1.8 0.005 0.0002"/>
+                friction="2.01 0.005 0.0002"/>
           <geom name="rim_rl" type="cylinder"
                 size="0.052 0.037"
                 euler="1.5708 0 0"
@@ -461,7 +521,7 @@
                 euler="1.5708 0 0"
                 rgba="0.08 0.08 0.08 1"
                 mass="0.425"
-                friction="1.8 0.005 0.0002"/>
+                friction="2.01 0.005 0.0002"/>
           <geom name="rim_rr" type="cylinder"
                 size="0.052 0.037"
                 euler="1.5708 0 0"
