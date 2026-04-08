@@ -328,7 +328,7 @@ class GPRetrainManager:
             if self.logger:
                 self.logger.info(
                     f"GP retraining finished in {elapsed:.2f}s | "
-                    f"N_used={len(pitch)} | kernel={self.cfg.train_kernel} | iters={self.cfg.train_iters}"
+                    f"N_used={len(X)} | kernel={self.cfg.train_kernel} | iters={self.cfg.train_iters}"
                 )
 
             self.reload_pending = True

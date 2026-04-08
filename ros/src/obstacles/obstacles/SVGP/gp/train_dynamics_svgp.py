@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-train_gp_modular.py
+train_svgp_modular.py
 
-Modular Exact-GP training driven by configuration:
+Modular SVGP training driven by configuration:
 - Choose input signal keys -> build X(t)
 - Choose output signal keys -> build Y(t) in modes: derivative / delta / next
-- Train 1 GP per output dimension (scalar output per GP)
+- Train 1 SVGP per output dimension (scalar output per GP)
 
 Expected NPZ: arrays keyed by your chosen signal names.
 """
@@ -17,12 +17,13 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 
-from gp_dynamics import GPManager
+from svgp_dynamics import SVGPManager   # <-- this should now be your SVGP-based SVGPManager
 
 from pathlib import Path
 import sys
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 from config.config_loader import cfg_params
+
 
 # -----------------------------
 # Config
@@ -36,14 +37,19 @@ class TrainConfig:
     output_keys: List[str]
 
     target_mode: str = cfg_params.gp.type_of_data   # "derivative" | "delta" | "next"
-    N_target: int | None = None       # None -> use all
+    N_target: int | None = None
     seed: int = 123
 
     kernel: str = cfg_params.gp.kernel
+    lr: float = 0.03
     iters: int = 300
 
+    # ---- SVGP-specific ----
+    num_inducing: int = 128
+    batch_size: int | None = 256   # None -> full batch
+
     out_dir: str = "models"
-    prefix: str = "gp_dynamics"            # saved as f"{prefix}_{name}.pt"
+    prefix: str = "svgp_dynamics"  # saved as f"{prefix}_{name}.pt"
 
 
 # -----------------------------
@@ -85,7 +91,12 @@ def build_X(signals: Dict[str, np.ndarray], input_keys: List[str]) -> np.ndarray
     return X  # (N-1, Dx)
 
 
-def build_Y(signals: Dict[str, np.ndarray], output_keys: List[str], dt: float, mode: str) -> Tuple[np.ndarray, List[str]]:
+def build_Y(
+    signals: Dict[str, np.ndarray],
+    output_keys: List[str],
+    dt: float,
+    mode: str
+) -> Tuple[np.ndarray, List[str]]:
     """
     Build Y in one of these modes:
       - derivative: (s[t+1] - s[t]) / dt
@@ -117,7 +128,6 @@ def build_Y(signals: Dict[str, np.ndarray], output_keys: List[str], dt: float, m
 
         Y_parts.append(yk)
 
-        # name each column
         Dk = yk.shape[1]
         if Dk == 1:
             y_names.append(f"{k}_{suffix}")
@@ -129,7 +139,12 @@ def build_Y(signals: Dict[str, np.ndarray], output_keys: List[str], dt: float, m
     return Y, y_names
 
 
-def maybe_subsample(X: np.ndarray, Y: np.ndarray, N_target: int | None, seed: int) -> Tuple[np.ndarray, np.ndarray]:
+def maybe_subsample(
+    X: np.ndarray,
+    Y: np.ndarray,
+    N_target: int | None,
+    seed: int
+) -> Tuple[np.ndarray, np.ndarray]:
     """Uniform random subsample (NOT stratified)."""
     N = X.shape[0]
     if N_target is None or N_target >= N:
@@ -144,9 +159,11 @@ def maybe_subsample(X: np.ndarray, Y: np.ndarray, N_target: int | None, seed: in
 # -----------------------------
 # Training
 # -----------------------------
-def train_gps_from_npz(cfg: TrainConfig) -> Tuple[List[GPManager], np.ndarray, np.ndarray, List[str]]:
+def train_gps_from_npz(
+    cfg: TrainConfig
+) -> Tuple[List[SVGPManager], np.ndarray, np.ndarray, List[str]]:
     """
-    Loads signals from NPZ, builds X/Y per cfg, trains one GP per output dim,
+    Loads signals from NPZ, builds X/Y per cfg, trains one SVGP per output dim,
     returns (gps, X_used, Y_used, y_names).
     """
     all_keys = sorted(set(cfg.input_keys + cfg.output_keys))
@@ -157,7 +174,10 @@ def train_gps_from_npz(cfg: TrainConfig) -> Tuple[List[GPManager], np.ndarray, n
     Y_full, y_names = build_Y(signals, cfg.output_keys, cfg.dt, cfg.target_mode)
 
     if X_full.shape[0] != Y_full.shape[0]:
-        raise RuntimeError(f"Shape mismatch: X has {X_full.shape[0]} rows, Y has {Y_full.shape[0]} rows.")
+        raise RuntimeError(
+            f"Shape mismatch: X has {X_full.shape[0]} rows, "
+            f"Y has {Y_full.shape[0]} rows."
+        )
 
     X, Y = maybe_subsample(X_full, Y_full, cfg.N_target, cfg.seed)
 
@@ -165,24 +185,37 @@ def train_gps_from_npz(cfg: TrainConfig) -> Tuple[List[GPManager], np.ndarray, n
     print(f"[DATA] X_full={X_full.shape}, Y_full={Y_full.shape}, using X={X.shape}, Y={Y.shape}")
     print(f"[DATA] inputs={cfg.input_keys}")
     print(f"[DATA] outputs={cfg.output_keys} (mode={cfg.target_mode})")
+    print(f"[SVGP] kernel={cfg.kernel}, lr={cfg.lr}, iters={cfg.iters}, "
+          f"num_inducing={cfg.num_inducing}, batch_size={cfg.batch_size}")
 
     Dy = Y.shape[1]
-    gps = [GPManager(kernel=cfg.kernel, iters=cfg.iters) for _ in range(Dy)]
+    gps = [
+        SVGPManager(
+            kernel=cfg.kernel,
+            lr=cfg.lr,
+            iters=cfg.iters,
+            num_inducing=cfg.num_inducing,
+            batch_size=cfg.batch_size,
+        )
+        for _ in range(Dy)
+    ]
 
     for j in range(Dy):
         gps[j].fit(X, Y[:, j])
-        print(f"[TRAIN] GP[{j}] trained for '{y_names[j]}' with {X.shape[0]} samples.")
+        print(
+            f"[TRAIN] SVGP[{j}] trained for '{y_names[j]}' "
+            f"with {X.shape[0]} samples."
+        )
 
     return gps, X, Y, y_names
 
 
-def save_gps(gps: List[GPManager], y_names: List[str], out_dir: str, prefix: str) -> None:
+def save_gps(gps: List[SVGPManager], y_names: List[str], out_dir: str, prefix: str) -> None:
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
     for j, gp in enumerate(gps):
         name = y_names[j] if j < len(y_names) else f"y{j}"
-        # safe filename
         safe = "".join(c if (c.isalnum() or c in "_-") else "_" for c in name)
         p = out_path / f"{prefix}_{safe}.pt"
         gp.save(str(p))
@@ -193,8 +226,8 @@ def save_gps(gps: List[GPManager], y_names: List[str], out_dir: str, prefix: str
 # Example main (edit here)
 # -----------------------------
 if __name__ == "__main__":
-    script_dir = Path(__file__).resolve().parent        # obstacles/gp
-    obstacles_dir = script_dir                   # obstacles
+    script_dir = Path(__file__).resolve().parent
+    obstacles_dir = script_dir
 
     npz_file = cfg_params.files.ini_data_file
     npz = obstacles_dir / "data" / npz_file
@@ -202,8 +235,8 @@ if __name__ == "__main__":
     input_  = ["xpos", "xpos_dot", "pitch", "pitch_dot", "u"]
     output_ = ["xpos", "xpos_dot", "pitch", "pitch_dot"]
 
-    # input_=["pitch", "rate", "u"]
-    # output_=["pitch", "rate"]
+    # input_ = ["pitch", "rate", "u"]
+    # output_ = ["pitch", "rate"]
 
     # modes: derivative, delta, next
     mode = cfg_params.gp.type_of_data
@@ -215,10 +248,16 @@ if __name__ == "__main__":
         output_keys=output_,
         target_mode=mode,
         N_target=1000,
+
         kernel=cfg_params.gp.kernel,
+        lr=0.03,
         iters=300,
+
+        num_inducing=128,
+        batch_size=256,   # use None if you want full-batch SVGP training
+
         out_dir="models",
-        prefix="gp_dynamics",
+        prefix="svgp_dynamics",
     )
 
     print(f"[PATH] cwd={Path.cwd()}")
@@ -226,4 +265,3 @@ if __name__ == "__main__":
 
     gps, X_used, Y_used, y_names = train_gps_from_npz(cfg)
     save_gps(gps, y_names, cfg.out_dir, cfg.prefix)
-

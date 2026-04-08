@@ -2,15 +2,27 @@ import numpy as np
 import torch
 import gpytorch
 
-#_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 _device = torch.device("cuda")
 
 
-class ExactGPModel(gpytorch.models.ExactGP):
-    def __init__(self, train_x, train_y, likelihood, kernel: str = "RBF"):
-        super().__init__(train_x, train_y, likelihood)
+class SVGPModel(gpytorch.models.ApproximateGP):
+    def __init__(self, inducing_points: torch.Tensor, kernel: str = "RBF"):
+        input_dim = inducing_points.shape[-1]
 
-        input_dim = train_x.shape[-1]
+        variational_distribution = gpytorch.variational.CholeskyVariationalDistribution(
+            num_inducing_points=inducing_points.size(0)
+        )
+
+        variational_strategy = gpytorch.variational.VariationalStrategy(
+            self,
+            inducing_points,
+            variational_distribution,
+            learn_inducing_locations=True,
+        )
+
+        super().__init__(variational_strategy)
+
         self.mean_module = gpytorch.means.LinearMean(input_size=input_dim)
 
         if kernel == "RBF":
@@ -24,17 +36,28 @@ class ExactGPModel(gpytorch.models.ExactGP):
 
         self.covar_module = gpytorch.kernels.ScaleKernel(base_kernel)
 
-    def forward(self, x):
+
+    def forward(self, x: torch.Tensor):
         mean_x = self.mean_module(x)
         covar_x = self.covar_module(x)
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
 
-class GPManager:
-    def __init__(self, kernel: str = "RBF", lr: float = 0.03, iters: int = 300, device: torch.device = _device):
+class SVGPManager:
+    def __init__(
+        self,
+        kernel: str = "RBF",
+        lr: float = 0.03,
+        iters: int = 300,
+        num_inducing: int = 128,
+        batch_size: int | None = None,
+        device: torch.device = _device,
+    ):
         self.kernel = kernel
         self.lr = lr
         self.iters = iters
+        self.num_inducing = num_inducing
+        self.batch_size = batch_size
         self.device = device
 
         self.trained = False
@@ -42,7 +65,7 @@ class GPManager:
         self.Y_train: torch.Tensor | None = None
 
         self.likelihood: gpytorch.likelihoods.GaussianLikelihood | None = None
-        self.model: ExactGPModel | None = None
+        self.model: SVGPModel | None = None
 
         # normalization buffers
         self.X_mean = None
@@ -51,6 +74,7 @@ class GPManager:
         self.Y_std = None
         self.Xn = None
         self.Yn = None
+
 
     # ----------------------------- #
     #        FIT / INITIAL TRAIN    #
@@ -64,11 +88,13 @@ class GPManager:
 
         self.retrain()
 
+
     def retrain(self) -> None:
         if self.X_train is None or self.Y_train is None:
             raise RuntimeError("No training data set yet.")
         self._compute_normalization()
         self._train_model()
+
 
     # ----------------------------- #
     #       ADD NEW DATA POINTS     #
@@ -78,7 +104,6 @@ class GPManager:
         Y_new = torch.tensor(Y_new, dtype=torch.float32, device=self.device).flatten()
 
         if self.X_train is None:
-            # no previous data; treat as first fit
             self.fit(X_new.cpu().numpy(), Y_new.cpu().numpy())
             return
 
@@ -90,6 +115,7 @@ class GPManager:
 
         if retrain:
             self.retrain()
+
 
     # ----------------------------- #
     #         INTERNAL UTILS        #
@@ -109,29 +135,44 @@ class GPManager:
         self.Xn = (self.X_train - self.X_mean) / self.X_std
         self.Yn = (self.Y_train - self.Y_mean) / self.Y_std
 
+
+    def _select_inducing_points(self, Xn: torch.Tensor) -> torch.Tensor:
+        n = Xn.size(0)
+        m = min(self.num_inducing, n)
+
+        if m == n:
+            return Xn.clone()
+
+        idx = torch.randperm(n, device=Xn.device)[:m]
+        return Xn[idx].clone()
+
+
     def dataset(self):
         X_train = self.X_train.detach().cpu().numpy()
         Y_train = self.Y_train.detach().cpu().numpy()
         return X_train, Y_train
 
+
     def _train_model(self) -> None:
-        #self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_constraint=gpytorch.constraints.GreaterThan(1e-4)).to(self.device)
-        self.likelihood = gpytorch.likelihoods.GaussianLikelihood().to(self.device)
+        self.likelihood = gpytorch.likelihoods.GaussianLikelihood(
+            noise_constraint=gpytorch.constraints.GreaterThan(1e-4)).to(self.device)
+        
         self.likelihood.noise_covar.initialize(noise=1e-2)
 
-        self.model = ExactGPModel(
-            self.Xn,
-            self.Yn,
-            self.likelihood,
+        inducing_points = self._select_inducing_points(self.Xn)
+
+        self.model = SVGPModel(
+            inducing_points=inducing_points,
             kernel=self.kernel,
         ).to(self.device)
 
         self._optimize_gp(self.model, self.likelihood, self.Xn, self.Yn)
         self.trained = True
 
+
     def _optimize_gp(
         self,
-        model: ExactGPModel,
+        model: SVGPModel,
         likelihood: gpytorch.likelihoods.GaussianLikelihood,
         x: torch.Tensor,
         y: torch.Tensor) -> None:
@@ -139,25 +180,34 @@ class GPManager:
         model.train()
         likelihood.train()
 
-        opt = torch.optim.Adam(model.parameters(), lr=self.lr)
-        mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+        optimizer = torch.optim.Adam(
+            [
+                {"params": model.parameters()},
+                {"params": likelihood.parameters()},
+            ],
+            lr=self.lr,
+        )
 
+        num_data = y.size(0)
+        mll = gpytorch.mlls.VariationalELBO(likelihood, model, num_data=num_data)
 
         with gpytorch.settings.cholesky_jitter(1e-3, 1e-6):
             for _ in range(self.iters):
-                opt.zero_grad()
-                out = model(x)
-                loss = -mll(out, y)
-                loss.backward()
-                opt.step()
+                if self.batch_size is None or self.batch_size >= num_data:
+                    batches = (torch.arange(num_data, device=x.device),)
+                else:
+                    perm = torch.randperm(num_data, device=x.device)
+                    batches = perm.split(self.batch_size)
 
+                for batch_idx in batches:
+                    xb = x[batch_idx]
+                    yb = y[batch_idx]
 
-        # for _ in range(self.iters):
-        #     opt.zero_grad()
-        #     out = model(x)
-        #     loss = -mll(out, y)
-        #     loss.backward()
-        #     opt.step()
+                    optimizer.zero_grad()
+                    out = model(xb)
+                    loss = -mll(out, yb)
+                    loss.backward()
+                    optimizer.step()
 
         model.eval()
         likelihood.eval()
@@ -173,28 +223,32 @@ class GPManager:
         with torch.no_grad(), gpytorch.settings.cholesky_jitter(1e-3, 1e-6):
             pred = self.likelihood(self.model(Xn))
             mean = pred.mean * self.Y_std + self.Y_mean
-            #var = pred.variance * (self.Y_std**2)
-        return mean #, var
+            # var = pred.variance * (self.Y_std ** 2)
+
+        return mean  # , var
 
     # ====================================================
-    #           NEW: SAVE / LOAD FOR REUSE
+    #           SAVE / LOAD FOR REUSE
     # ====================================================
     def save(self, path: str) -> None:
         """
-        Save trained GP to disk so you can reuse it without retraining.
+        Save trained SVGP to disk.
         Stores:
-          - hyperparameters (kernel, lr, iters)
+          - hyperparameters
           - model & likelihood state_dict
           - normalization stats
-          - training data (needed for exact GP inference)
+          - training data (useful for retraining / add_data)
+          - inducing points
         """
         if not self.trained or self.model is None or self.likelihood is None:
-            raise RuntimeError("Cannot save an untrained GPManager.")
+            raise RuntimeError("Cannot save an untrained SVGPManager.")
 
         state = {
             "kernel": self.kernel,
             "lr": self.lr,
             "iters": self.iters,
+            "num_inducing": self.num_inducing,
+            "batch_size": self.batch_size,
 
             "X_train": self.X_train.detach().cpu(),
             "Y_train": self.Y_train.detach().cpu(),
@@ -204,15 +258,17 @@ class GPManager:
             "Y_mean": self.Y_mean.detach().cpu(),
             "Y_std": self.Y_std.detach().cpu(),
 
+            "inducing_points": self.model.variational_strategy.inducing_points.detach().cpu(),
+
             "model_state_dict": self.model.state_dict(),
             "likelihood_state_dict": self.likelihood.state_dict(),
         }
         torch.save(state, path)
 
     @classmethod
-    def load(cls, path: str, device: torch.device | None = None) -> "GPManager":
+    def load(cls, path: str, device: torch.device | None = None) -> "SVGPManager":
         """
-        Load a previously saved GPManager from disk.
+        Load a previously saved SVGPManager from disk.
         No retraining, just rebuild model + likelihood and load weights.
         """
         if device is None:
@@ -224,6 +280,8 @@ class GPManager:
             kernel=state["kernel"],
             lr=state["lr"],
             iters=state["iters"],
+            num_inducing=state["num_inducing"],
+            batch_size=state["batch_size"],
             device=device,
         )
 
@@ -231,20 +289,23 @@ class GPManager:
         gp.Y_train = state["Y_train"].to(device)
 
         gp.X_mean = state["X_mean"].to(device)
-        gp.X_std  = state["X_std"].to(device)
+        gp.X_std = state["X_std"].to(device)
         gp.Y_mean = state["Y_mean"].to(device)
-        gp.Y_std  = state["Y_std"].to(device)
+        gp.Y_std = state["Y_std"].to(device)
 
-        # recompute normalized training data
         gp.Xn = (gp.X_train - gp.X_mean) / gp.X_std
         gp.Yn = (gp.Y_train - gp.Y_mean) / gp.Y_std
 
-        # rebuild likelihood + model and load weights
-        gp.likelihood = gpytorch.likelihoods.GaussianLikelihood().to(device)
+        gp.likelihood = gpytorch.likelihoods.GaussianLikelihood(
+            noise_constraint=gpytorch.constraints.GreaterThan(1e-4)
+        ).to(device)
         gp.likelihood.load_state_dict(state["likelihood_state_dict"])
 
-        gp.model = ExactGPModel(
-            gp.Xn, gp.Yn, gp.likelihood, kernel=gp.kernel
+        inducing_points = state["inducing_points"].to(device)
+
+        gp.model = SVGPModel(
+            inducing_points=inducing_points,
+            kernel=gp.kernel,
         ).to(device)
         gp.model.load_state_dict(state["model_state_dict"])
 
