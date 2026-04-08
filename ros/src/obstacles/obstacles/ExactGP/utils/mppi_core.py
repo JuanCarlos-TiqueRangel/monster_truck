@@ -48,20 +48,7 @@ class MPPICore:
         # Expose mean cost for logging/plotting
         self.last_mean_cost = 0.0
 
-        self.feature_map_torch = feature_map_torch
-
-
-
-    def feature_map_torch(self, states: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
-        """
-        PALSGP-lite feature map φ(s,u) default 5D.
-        """
-        xpos = states[:, 0]
-        xdot = states[:, 1]
-        pitch = states[:, 2]
-        pitch_dot = states[:, 3]
-        uvals = actions.view(-1)
-        return torch.stack([xpos, xdot, pitch, pitch_dot, uvals], dim=-1)
+        self._custom_feature_map = feature_map_torch
 
     def phi(self, states: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
         """
@@ -76,14 +63,14 @@ class MPPICore:
         """
         if actions.ndim == 2:
             actions = actions.view(-1)
-        if self.feature_map_torch is None:
+        if self._custom_feature_map is None:
             # default: match existing models (5D)
             return torch.stack(
                 [states[:, 0], states[:, 1], states[:, 2], states[:, 3], actions],
                 dim=-1,
             )
         # user-provided feature map should accept actions [B,1]
-        return self.feature_map_torch(states, actions.view(-1, 1))
+        return self._custom_feature_map(states, actions.view(-1, 1))
 
 
 
@@ -101,18 +88,25 @@ class MPPICore:
     # COST FUNCTION FOR OBSTACLED
 
     def stage_cost_torch(self, states: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+        # xpos, xpos_dot, pitch, pitch_dot
         xpos = states[:, 0]
+        xpos_dot = states[:, 1]
         pitch = states[:, 2]
+        pitch_dot = states[:, 3]
         u = actions
 
         pitch_err = pitch - float(self.cfg.pitch_target)
         goal_err = xpos - float(self.cfg.goal_x)
 
-        cost_pitch = float(self.cfg.w_pitch) * (pitch_err ** 2)
+        #cost_pitch = float(self.cfg.w_pitch) * (pitch_err ** 2)
+        cost_pitch = float(self.cfg.w_pitch) * (pitch ** 2)
+        cost_pitch_dot = float(self.cfg.w_pitch_dot) * (pitch_dot ** 2)
         cost_goal = float(self.cfg.w_goal) * (goal_err ** 2)
+        cost_xpos_dot = float(self.cfg.w_xpos_dot) * (xpos_dot ** 2)
+        progress = -float(self.cfg.w_xpos_dot) * xpos_dot * torch.sign(float(self.cfg.goal_x) - xpos)
         cost_u = float(self.cfg.w_u) * (u ** 2)
 
-        return cost_pitch + cost_goal + cost_u
+        return cost_goal + cost_u #+ cost_pitch_dot + cost_pitch
 
 
 
@@ -159,7 +153,7 @@ class MPPICore:
 
         eps = torch.randn(K, H, device=self.device) * cfg.sigma
         U = torch.clamp(u_init.unsqueeze(0) + eps, cfg.u_min, cfg.u_max)
-        delta = U - u_init.unsqueeze(0)          # <-- important
+        delta = U - u_init.unsqueeze(0)
 
         states = x0.unsqueeze(0).repeat(K, 1)
         costs = torch.zeros(K, dtype=torch.float32, device=self.device)
@@ -169,16 +163,19 @@ class MPPICore:
             costs = costs + self.stage_cost_torch(states, u_t)
             states = self.gp_step_batch_torch(states, u_t)
 
+        # --- control smoothness penalty ---
+        u_diff = U[:, 1:] - U[:, :-1]            # (K, H-1)
+        costs = costs + float(cfg.w_du) * (u_diff ** 2).sum(dim=1)
+
         self.last_mean_cost = float(costs.mean().item())
 
         J_min = costs.min()
         w = torch.exp(-(costs - J_min) / cfg.lambda_)
         wsum = w.sum() + 1e-8
 
-        #du = (w.unsqueeze(1) * eps).sum(dim=0) / wsum
-        du = (w.unsqueeze(1) * delta).sum(dim=0) / wsum
+        u_update = (w.unsqueeze(1) * delta).sum(dim=0) / wsum
 
-        u_new = torch.clamp(u_init + du, cfg.u_min, cfg.u_max)
+        u_new = torch.clamp(u_init + u_update, cfg.u_min, cfg.u_max)
 
         self.plan = torch.cat([u_new[1:], u_new[-1:]], dim=0).detach()
         return float(u_new[0].detach().cpu())

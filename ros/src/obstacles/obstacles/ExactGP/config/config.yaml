@@ -3,7 +3,8 @@
 files:
     mujoco_model: "planar_monstertruck.xml"
     ini_data_file: "mujoco_random_obstacles.npz"
-    # ini_data_file: "dataset_ep0462.npz"
+    # ini_data_file: "dataset_ep0060.npz"
+    # ini_data_file: "dataset_ep0082.npz"
 
 models: 
     xpos: "gp_dynamics_xpos_delta.pt"
@@ -14,6 +15,6 @@ models:
 gp:
     sample_time_dt: 0.1
     type_of_data: "delta"
-    kernel: "RBF"
+    kernel: "RQ"
     batch_size: 1000
     num_inducing: 1000

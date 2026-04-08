@@ -19,39 +19,39 @@ class EpisodeMetricsWriter:
                 w.writerow(["episode", "time_to_goal_sec", "retrain_started", "cost"])
 
 
-    def write(self, episode: int, time_to_goal_sec: float, retrain_started: bool, cost: float):
-            ep = int(episode)
-            dt = float(time_to_goal_sec)
-            rs = int(bool(retrain_started))
-            c  = float(cost)
+    # def write(self, episode: int, time_to_goal_sec: float, retrain_started: bool, cost: float):
+    #         ep = int(episode)
+    #         dt = float(time_to_goal_sec)
+    #         rs = int(bool(retrain_started))
+    #         c  = float(cost)
 
-            if self.logger:
-                self.logger.info(
-                    f"Episode {ep} time_to_goal: {dt:.3f} s | retrain_started={rs} | cost={c:.3f}"
-                )
+    #         if self.logger:
+    #             self.logger.info(
+    #                 f"Episode {ep} time_to_goal: {dt:.3f} s | retrain_started={rs} | cost={c:.3f}"
+    #             )
 
-            with open(self.metrics_path, "a", newline="") as f:
-                w = csv.writer(f)
-                w.writerow([ep, dt, rs, c])
+    #         with open(self.metrics_path, "a", newline="") as f:
+    #             w = csv.writer(f)
+    #             w.writerow([ep, dt, rs, c])
 
-            if self.plotter is not None:
-                self.plotter.update(ep, dt, c)
+    #         if self.plotter is not None:
+    #             self.plotter.update(ep, dt, c)
 
-    # def write(self, episode: int, time_to_goal_sec: float, retrain_started: bool, cost: float, success: int):
-    #     ep = int(episode)
-    #     dt = float(time_to_goal_sec)
-    #     rs = int(bool(retrain_started))
-    #     c  = float(cost)
-    #     succ = int(success)
+    def write(self, episode: int, time_to_goal_sec: float, retrain_started: bool, cost: float, success: int):
+        ep = int(episode)
+        dt = float(time_to_goal_sec)
+        rs = int(bool(retrain_started))
+        c  = float(cost)
+        succ = int(success)
 
-    #     if self.logger:
-    #         self.logger.info(
-    #             f"Episode {ep} time_to_goal: {dt:.3f} s | retrain_started={rs} | cost={c:.3f} | Success = {succ}"
-    #         )
+        if self.logger:
+            self.logger.info(
+                f"Episode {ep} time_to_goal: {dt:.3f} s | retrain_started={rs} | cost={c:.3f} | Success = {succ}"
+            )
 
-    #     with open(self.metrics_path, "a", newline="") as f:
-    #         w = csv.writer(f)
-    #         w.writerow([ep, dt, rs, c, succ])
+        with open(self.metrics_path, "a", newline="") as f:
+            w = csv.writer(f)
+            w.writerow([ep, dt, rs, c, succ])
 
-    #     if self.plotter is not None:
-    #         self.plotter.update(ep, dt, c)
+        if self.plotter is not None:
+            self.plotter.update(ep, dt, c)

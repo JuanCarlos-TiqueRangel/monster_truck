@@ -115,8 +115,10 @@ class GPManager:
         return X_train, Y_train
 
     def _train_model(self) -> None:
+        self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_constraint=gpytorch.constraints.GreaterThan(1e-4)).to(self.device)
         self.likelihood = gpytorch.likelihoods.GaussianLikelihood().to(self.device)
-        self.likelihood.noise_covar.initialize(noise=1e-3)
+        self.likelihood.noise_covar.initialize(noise=1e-2)
+
 
         self.model = ExactGPModel(
             self.Xn,
@@ -141,12 +143,22 @@ class GPManager:
         opt = torch.optim.Adam(model.parameters(), lr=self.lr)
         mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
 
-        for _ in range(self.iters):
-            opt.zero_grad()
-            out = model(x)
-            loss = -mll(out, y)
-            loss.backward()
-            opt.step()
+
+        with gpytorch.settings.cholesky_jitter(1e-3, 1e-6):
+            for _ in range(self.iters):
+                opt.zero_grad()
+                out = model(x)
+                loss = -mll(out, y)
+                loss.backward()
+                opt.step()
+
+
+        # for _ in range(self.iters):
+        #     opt.zero_grad()
+        #     out = model(x)
+        #     loss = -mll(out, y)
+        #     loss.backward()
+        #     opt.step()
 
         model.eval()
         likelihood.eval()
@@ -159,11 +171,11 @@ class GPManager:
         X = torch.as_tensor(X, dtype=torch.float32, device=self.device)
         Xn = (X - self.X_mean) / self.X_std
 
-        with torch.no_grad(), gpytorch.settings.fast_pred_var():
+        with torch.no_grad(), gpytorch.settings.cholesky_jitter(1e-3, 1e-6):
             pred = self.likelihood(self.model(Xn))
             mean = pred.mean * self.Y_std + self.Y_mean
-            #var = pred.variance * (self.Y_std**2)
-        return mean #, var
+            var = pred.variance * (self.Y_std**2)
+        return mean , var
 
     # ====================================================
     #           NEW: SAVE / LOAD FOR REUSE
