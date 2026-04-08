@@ -115,10 +115,9 @@ class GPManager:
         return X_train, Y_train
 
     def _train_model(self) -> None:
-        self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_constraint=gpytorch.constraints.GreaterThan(1e-4)).to(self.device)
+        #self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_constraint=gpytorch.constraints.GreaterThan(1e-4)).to(self.device)
         self.likelihood = gpytorch.likelihoods.GaussianLikelihood().to(self.device)
         self.likelihood.noise_covar.initialize(noise=1e-2)
-
 
         self.model = ExactGPModel(
             self.Xn,
@@ -174,8 +173,8 @@ class GPManager:
         with torch.no_grad(), gpytorch.settings.cholesky_jitter(1e-3, 1e-6):
             pred = self.likelihood(self.model(Xn))
             mean = pred.mean * self.Y_std + self.Y_mean
-            var = pred.variance * (self.Y_std**2)
-        return mean , var
+            #var = pred.variance * (self.Y_std**2)
+        return mean #, var
 
     # ====================================================
     #           NEW: SAVE / LOAD FOR REUSE

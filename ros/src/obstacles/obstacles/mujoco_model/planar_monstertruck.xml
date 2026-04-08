@@ -21,19 +21,19 @@
       <geom name="ground" type="plane" size="100 100 0.1" rgba="1 1 1 1"/>
 
       <!-- obstacles single box-->
-      <!-- <geom name="obs_box_1" type="box"
+      <geom name="obs_box_1" type="box"
             pos="2.0 0.0 0.05"
             size="0.30 0.30 0.05"
             rgba="0.2 0.2 0.8 1"
-            friction="5.01 0.01 0.0005"/> -->
+            friction="5.01 0.01 0.0005"/>
 
 
       <!-- obstacles higher box-->
-      <geom name="obs_box_1" type="box"
+      <!-- <geom name="obs_box_1" type="box"
             pos="2.0 0.0 0.1"
             size="0.30 0.30 0.1"
             rgba="0.2 0.2 0.8 1"
-            friction="5.01 0.01 0.0005"/>
+            friction="5.01 0.01 0.0005"/> -->
 
 
       <!-- obstacles rounded cilinders-->

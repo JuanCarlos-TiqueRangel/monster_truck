@@ -85,12 +85,7 @@ def build_X(signals: Dict[str, np.ndarray], input_keys: List[str]) -> np.ndarray
     return X  # (N-1, Dx)
 
 
-def build_Y(
-    signals: Dict[str, np.ndarray],
-    output_keys: List[str],
-    dt: float,
-    mode: str,
-) -> Tuple[np.ndarray, List[str]]:
+def build_Y(signals: Dict[str, np.ndarray], output_keys: List[str], dt: float, mode: str) -> Tuple[np.ndarray, List[str]]:
     """
     Build Y in one of these modes:
       - derivative: (s[t+1] - s[t]) / dt
