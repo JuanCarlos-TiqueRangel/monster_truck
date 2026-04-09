@@ -38,8 +38,6 @@ from utils.episode_metrics import EpisodeMetricsWriter
 
 
 
-
-
 # ============================================================
 # Config
 # ============================================================
@@ -117,7 +115,7 @@ class MPPIConfig:
     x_min_terminate: float = -3.0
 
     live_plot_mode: str = "both"
-    just_gp_model: bool = True
+    just_gp_model: bool = False
     stop_re_training_mode: bool = False
 
 
