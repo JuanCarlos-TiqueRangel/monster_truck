@@ -117,6 +117,136 @@ class SVGPManager:
             self.retrain()
 
 
+
+    def partial_fit(self, X_new: np.ndarray, Y_new: np.ndarray, steps: int = 50, 
+                    replay_size: int = 256, batch_size: int | None = None, 
+                    max_keep: int | None = None) -> None:
+        """
+        Warm-update the current SVGP with new data.
+        IMPORTANT:
+        - does NOT recompute normalization
+        - does NOT rebuild inducing points
+        - continues optimizing the current model
+        """
+
+        if not self.trained or self.model is None or self.likelihood is None:
+            # first time: just do a normal full fit
+            self.fit(X_new, Y_new)
+            return
+
+        X_new = torch.as_tensor(X_new, dtype=torch.float32, device=self.device)
+        Y_new = torch.as_tensor(Y_new, dtype=torch.float32, device=self.device).flatten()
+
+        if X_new.ndim != 2:
+            raise ValueError(f"X_new must be 2D, got shape {tuple(X_new.shape)}")
+        if Y_new.ndim != 1:
+            raise ValueError(f"Y_new must be 1D after flatten, got shape {tuple(Y_new.shape)}")
+        if X_new.shape[0] != Y_new.shape[0]:
+            raise ValueError(f"X_new/Y_new size mismatch: {X_new.shape[0]} vs {Y_new.shape[0]}")
+
+        # -------------------------------------------------
+        # Append raw data to stored history
+        # -------------------------------------------------
+        self.X_train = torch.cat([self.X_train, X_new], dim=0)
+        self.Y_train = torch.cat([self.Y_train, Y_new], dim=0)
+
+        # Optional cap on stored history
+        if max_keep is not None and self.X_train.shape[0] > max_keep:
+            self.X_train = self.X_train[-max_keep:]
+            self.Y_train = self.Y_train[-max_keep:]
+
+        # -------------------------------------------------
+        # IMPORTANT: reuse OLD normalization
+        # -------------------------------------------------
+        Xn_new = (X_new - self.X_mean) / self.X_std
+        Yn_new = (Y_new - self.Y_mean) / self.Y_std
+
+        # -------------------------------------------------
+        # Replay from old data to avoid forgetting
+        # -------------------------------------------------
+        total_n = self.X_train.shape[0]
+        new_n = X_new.shape[0]
+        old_n = max(0, total_n - new_n)
+
+        if replay_size > 0 and old_n > 0:
+            n_replay = min(replay_size, old_n)
+            idx_old = torch.randperm(old_n, device=self.device)[:n_replay]
+
+            X_old = self.X_train[:old_n][idx_old]
+            Y_old = self.Y_train[:old_n][idx_old]
+
+            Xn_old = (X_old - self.X_mean) / self.X_std
+            Yn_old = (Y_old - self.Y_mean) / self.Y_std
+
+            Xn_mix = torch.cat([Xn_old, Xn_new], dim=0)
+            Yn_mix = torch.cat([Yn_old, Yn_new], dim=0)
+        else:
+            Xn_mix = Xn_new
+            Yn_mix = Yn_new
+
+        # Keep cached normalized full dataset roughly consistent
+        self.Xn = (self.X_train - self.X_mean) / self.X_std
+        self.Yn = (self.Y_train - self.Y_mean) / self.Y_std
+
+        self._continue_optimization(x=Xn_mix, y=Yn_mix, 
+                                    total_num_data=self.X_train.shape[0], 
+                                    steps=steps, batch_size=batch_size)
+
+        self.trained = True
+
+
+    def _continue_optimization(
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        total_num_data: int,
+        steps: int = 50,
+        batch_size: int | None = None,
+    ) -> None:
+        """
+        Continue training the current SVGP model in-place.
+        Uses the CURRENT model/likelihood, not a rebuilt one.
+        """
+        if self.model is None or self.likelihood is None:
+            raise RuntimeError("Model/likelihood not initialized.")
+
+        self.model.train()
+        self.likelihood.train()
+
+        bs = self.batch_size if batch_size is None else batch_size
+
+        optimizer = torch.optim.Adam(
+            [
+                {"params": self.model.parameters()},
+                {"params": self.likelihood.parameters()},
+            ],
+            lr=self.lr,
+        )
+
+        mll = gpytorch.mlls.VariationalELBO(self.likelihood, self.model, num_data=total_num_data)
+
+        with gpytorch.settings.cholesky_jitter(1e-3, 1e-6):
+            for _ in range(steps):
+                if bs is None or bs >= x.size(0):
+                    batches = (torch.arange(x.size(0), device=x.device),)
+                else:
+                    perm = torch.randperm(x.size(0), device=x.device)
+                    batches = perm.split(bs)
+
+                for batch_idx in batches:
+                    xb = x[batch_idx]
+                    yb = y[batch_idx]
+
+                    optimizer.zero_grad()
+                    out = self.model(xb)
+                    loss = -mll(out, yb)
+                    loss.backward()
+                    optimizer.step()
+
+        self.model.eval()
+        self.likelihood.eval()
+
+
     # ----------------------------- #
     #         INTERNAL UTILS        #
     # ----------------------------- #
