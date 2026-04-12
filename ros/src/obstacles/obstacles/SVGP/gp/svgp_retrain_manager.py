@@ -111,12 +111,8 @@ def _maybe_check_dt(D: np.lib.npyio.NpzFile, dt: float, context: str):
             raise ValueError(f"{context} dt mismatch: file dt={dt_file} vs requested dt={dt}")
 
 
-def _load_seed_npz(
-    seed_npz_path: str,
-    keys_needed: List[str],
-    dt: float,
-    seed_episode_id: int,
-) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
+def _load_seed_npz( seed_npz_path: str, keys_needed: List[str], 
+                   dt: float, seed_episode_id: int) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
     """
     Loads a seed NPZ with arbitrary keys_needed.
     Returns: (signals_seed_dict, episode_id_seed_array)
@@ -140,6 +136,33 @@ def _load_seed_npz(
         ep_seed = np.full(Ns, int(seed_episode_id), dtype=np.int64)
 
     return signals_seed, ep_seed
+
+
+
+
+def _keep_recent_episodes(pitch: np.ndarray, pitch_dot: np.ndarray, xpos: np.ndarray, 
+                          xpos_dot: np.ndarray, u: np.ndarray, ep: np.ndarray, window_episodes: int):
+    """
+    Keep only samples belonging to the most recent `window_episodes` episode IDs.
+    """
+    ep = np.asarray(ep, dtype=np.int64).reshape(-1)
+    if ep.size == 0:
+        return pitch, pitch_dot, xpos, xpos_dot, u, ep
+
+    last_ep = int(ep.max())
+    first_keep_ep = last_ep - int(window_episodes) + 1
+
+    keep = ep >= first_keep_ep
+
+    return (
+        np.asarray(pitch)[keep],
+        np.asarray(pitch_dot)[keep],
+        np.asarray(xpos)[keep],
+        np.asarray(xpos_dot)[keep],
+        np.asarray(u)[keep],
+        ep[keep],
+    )
+
 
 
 # --------------------------------------------------------------
@@ -277,9 +300,28 @@ class GPRetrainManager:
         flip, rate, x, vx, u, ep = dataset.snapshot()
         dataset.save_npz(episode_id, flip, rate, x, vx, u, ep)
 
-        # cap training window
+        # -------------------------------------------------
+        # Keep only the most recent W episodes
+        # -------------------------------------------------
+        W = int(getattr(self.cfg, "recent_episodes_window", 10))
+        flip, rate, x, vx, u, ep = _keep_recent_episodes(
+            flip, rate, x, vx, u, ep, window_episodes=W
+        )
+
+        # Optional safety cap by number of points after episode filtering
         M = int(self.cfg.max_points_for_train)
-        flip, rate, x, vx, u, ep = dataset.cap_window(M, flip, rate, x, vx, u, ep)
+        if len(ep) > M:
+            flip, rate, x, vx, u, ep = dataset.cap_window(M, flip, rate, x, vx, u, ep)
+
+        # Require a minimum number of distinct episodes in the current window
+        min_eps = int(getattr(self.cfg, "min_episodes_in_window_to_train", 3))
+        n_eps_in_window = len(np.unique(ep))
+        if n_eps_in_window < min_eps:
+            if self.logger:
+                self.logger.info(
+                    f"Not enough episodes in sliding window yet: {n_eps_in_window} < {min_eps}"
+                )
+            return False
 
         self.training = True
         n_at_start = n
@@ -295,6 +337,9 @@ class GPRetrainManager:
             self.logger.info("Started SVGP retraining thread.")
         return True
 
+
+
+
     def _train_worker(self, pitch, pitch_dot, xpos, xpos_dot, u, ep, n_at_start: int):
         t0 = time.perf_counter()
 
@@ -306,52 +351,146 @@ class GPRetrainManager:
             "u": u,
         }
 
+        ep_min = int(np.min(ep)) if len(ep) > 0 else -1
+        ep_max = int(np.max(ep)) if len(ep) > 0 else -1
+
         input_ = ["xpos", "xpos_dot", "pitch", "pitch_dot", "u"]
         output_ = ["xpos", "xpos_dot", "pitch", "pitch_dot"]
         model_mode = cfg_params.gp.type_of_data
 
-        try:
-            gps, X, Y, y_names = train_dynamics_gp_from_arrays(
-                signals_new=signals,
-                dt=self.cfg.ctrl_dt,
-                input_keys=input_,
-                output_keys=output_,
-                episode_id=ep,
-                target_mode=model_mode,
-                kernel=self.cfg.train_kernel,
-                lr=self.cfg.train_lr,
-                iters=self.cfg.train_iters,
-                num_inducing=self.cfg.train_num_inducing,
-                batch_size=self.cfg.train_batch_size,
-                seed_npz_path=self.cfg.seed_npz_path,
-                keep_seed=self.cfg.keep_seed,
-            )
+        paths = [
+            self.cfg.gp_xpos_path,
+            self.cfg.gp_xpos_dot_path,
+            self.cfg.gp_pitch_path,
+            self.cfg.gp_pitch_dot_path,
+        ]
 
-            paths = [
-                self.cfg.gp_xpos_path,
-                self.cfg.gp_xpos_dot_path,
-                self.cfg.gp_pitch_path,
-                self.cfg.gp_pitch_dot_path,
-            ]
+        try:
+            # -------------------------------------------------
+            # Build WINDOW dataset (for FULL retrain)
+            # -------------------------------------------------
+            signals_window = {k: _as_2d(v) for k, v in signals.items()}
+            signals_window = _align_signals(signals_window)
+            ep_window = np.asarray(ep, dtype=np.int64).reshape(-1)[: next(iter(signals_window.values())).shape[0]]
+
+            # -------------------------------------------------
+            # Build ONLY the latest-episode dataset (for PARTIAL update)
+            # -------------------------------------------------
+            latest_ep = int(ep_window.max()) if ep_window.size > 0 else 0
+            latest_mask = (ep_window == latest_ep)
+
+            if latest_mask.sum() < 2:
+                raise ValueError(f"Latest episode {latest_ep} has fewer than 2 samples.")
+
+            signals_latest = {
+                k: np.asarray(v)[latest_mask] for k, v in signals_window.items()
+            }
+            signals_latest = _align_signals(signals_latest)
+
+            ep_latest = ep_window[latest_mask]
+            Nl = next(iter(signals_latest.values())).shape[0]
+            valid_latest = _valid_mask(Nl, ep_latest)
+
+            X_latest = _build_X(signals_latest, input_, valid_latest)
+            Y_latest, _ = _build_Y(signals_latest, output_, self.cfg.ctrl_dt, model_mode, valid_latest)
+
+            if X_latest.shape[0] == 0:
+                raise ValueError(f"No valid transitions for latest episode {latest_ep}.")
+
+            # -------------------------------------------------
+            # Decide: periodic full retrain or warm update
+            # -------------------------------------------------
+            full_every = int(getattr(self.cfg, "full_retrain_every_episodes", 0))
+
+            model_files_exist = all(os.path.exists(p) for p in paths)
+            do_full_retrain = (not model_files_exist) or (full_every > 0 and ((latest_ep + 1) % full_every == 0))
+
+            if do_full_retrain:
+                gps, X_used, Y_used, y_names = train_dynamics_gp_from_arrays(
+                    signals_new=signals,
+                    dt=self.cfg.ctrl_dt,
+                    input_keys=input_,
+                    output_keys=output_,
+                    episode_id=ep,
+                    target_mode=model_mode,
+                    kernel=self.cfg.train_kernel,
+                    lr=self.cfg.train_lr,
+                    iters=self.cfg.train_iters,
+                    num_inducing=self.cfg.train_num_inducing,
+                    batch_size=self.cfg.train_batch_size,
+                    seed_npz_path=self.cfg.seed_npz_path,
+                    keep_seed=self.cfg.keep_seed,
+                )
+
+                n_used_for_log = len(X_used)
+                mode_used = "FULL"
+
+            else:
+                # -------------------------------------------------
+                # Warm-update the CURRENT saved SVGPs
+                # -------------------------------------------------
+                gp_xpos = SVGPManager.load(self.cfg.gp_xpos_path, device=self.device)
+                gp_xpos_dot = SVGPManager.load(self.cfg.gp_xpos_dot_path, device=self.device)
+                gp_pitch = SVGPManager.load(self.cfg.gp_pitch_path, device=self.device)
+                gp_pitch_dot = SVGPManager.load(self.cfg.gp_pitch_dot_path, device=self.device)
+
+                online_steps = int(getattr(self.cfg, "online_update_steps", 50))
+                replay_size = int(getattr(self.cfg, "online_replay_size", 256))
+                max_keep = getattr(self.cfg, "online_max_keep_points", None)
+
+                gp_xpos.partial_fit(
+                    X_latest, Y_latest[:, 0],
+                    steps=online_steps,
+                    replay_size=replay_size,
+                    batch_size=self.cfg.train_batch_size,
+                    max_keep=max_keep,
+                )
+                gp_xpos_dot.partial_fit(
+                    X_latest, Y_latest[:, 1],
+                    steps=online_steps,
+                    replay_size=replay_size,
+                    batch_size=self.cfg.train_batch_size,
+                    max_keep=max_keep,
+                )
+                gp_pitch.partial_fit(
+                    X_latest, Y_latest[:, 2],
+                    steps=online_steps,
+                    replay_size=replay_size,
+                    batch_size=self.cfg.train_batch_size,
+                    max_keep=max_keep,
+                )
+                gp_pitch_dot.partial_fit(
+                    X_latest, Y_latest[:, 3],
+                    steps=online_steps,
+                    replay_size=replay_size,
+                    batch_size=self.cfg.train_batch_size,
+                    max_keep=max_keep,
+                )
+
+                gps = [gp_xpos, gp_xpos_dot, gp_pitch, gp_pitch_dot]
+                n_used_for_log = len(X_latest)
+                mode_used = "PARTIAL"
+
             assert len(gps) == len(paths)
 
+            # -------------------------------------------------
             # Atomic save
+            # -------------------------------------------------
             for gp, out_path in zip(gps, paths):
                 os.makedirs(os.path.dirname(out_path), exist_ok=True)
                 tmp_path = out_path + ".tmp"
                 gp.save(tmp_path)
                 os.replace(tmp_path, out_path)
 
-            # commit size only after success
             self.last_train_size = n_at_start
 
             elapsed = time.perf_counter() - t0
             if self.logger:
                 self.logger.info(
-                    f"SVGP retraining finished in {elapsed:.2f}s | "
-                    f"N_used={len(X)} | kernel={self.cfg.train_kernel} | "
-                    f"iters={self.cfg.train_iters} | "
-                    f"num_inducing={self.cfg.train_num_inducing} | "
+                    f"SVGP {mode_used} update finished in {elapsed:.2f}s | "
+                    f"N_used={n_used_for_log} | episodes=[{ep_min}, {ep_max}] | "
+                    f"kernel={self.cfg.train_kernel} | "
+                    f"iters={self.cfg.train_iters} | num_inducing={self.cfg.train_num_inducing} | "
                     f"batch_size={self.cfg.train_batch_size}"
                 )
 
@@ -365,6 +504,7 @@ class GPRetrainManager:
 
         finally:
             self.training = False
+
 
     def reload_models_if_ready(self):
         """

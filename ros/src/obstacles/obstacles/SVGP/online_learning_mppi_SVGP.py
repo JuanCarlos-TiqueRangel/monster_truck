@@ -79,7 +79,7 @@ class MPPIConfig:
 
     # ---- retrain ----
     min_points_to_train: int = 20
-    N_target_train: int = 900
+    N_target_train: int = 1000
     train_kernel: str = cfg_params.gp.kernel
     train_iters: int = 300
     train_lr: float = 0.03
@@ -122,9 +122,17 @@ class MPPIConfig:
     x_min_terminate: float = -3.0
 
     live_plot_mode: str = "both"
-    just_gp_model: bool = False
+    just_gp_model: bool = True
     stop_re_training_mode: bool = False
 
+    online_update_steps = 30
+    online_replay_size = 256
+    online_max_keep_points = 20000
+    full_retrain_every_episodes = 10
+    recent_episodes_window: int = 10
+    min_episodes_in_window_to_train: int = 3
+    retrain_every_episodes: int = 1
+    max_points_for_train = 20000
 
 # ============================================================
 # MPPI Controller Node
@@ -424,7 +432,7 @@ class MPPICarControllerNode(Node):
 
 
         # -------------------------------------------------
-        # Episode timeout
+        # Episode timeout - NOT useful retrain for SVGP
         # -------------------------------------------------
         if self.episode_start_time is not None:
             elapsed_ep = (self.get_clock().now() - self.episode_start_time).nanoseconds * 1e-9
@@ -452,6 +460,24 @@ class MPPICarControllerNode(Node):
 
                 self.request_reset(force=True)
                 return
+
+
+        # if self.episode_start_time is not None:
+        #     elapsed_ep = (self.get_clock().now() - self.episode_start_time).nanoseconds * 1e-9
+        #     if elapsed_ep >= float(cfg.episode_timeout_sec):
+        #         self.get_logger().warn(
+        #             f"Episode {int(self.episode_id)} TIMEOUT after {elapsed_ep:.2f}s "
+        #             f"(limit={cfg.episode_timeout_sec:.2f}s). Forcing reset."
+        #         )
+
+        #         self.dataset.drop_episode(self.episode_id)
+        #         self._record_episode_metric(retrain_started=True, success=0)
+        #         self.publish_u(0.0)
+
+        #         self.request_reset(force=True)
+        #         return
+            
+
 
         # -------------------------------------------------
         # Emergency stop: car flipped or nearly flipped
