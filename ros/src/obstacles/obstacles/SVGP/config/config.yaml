@@ -20,3 +20,5 @@ gp:
     kernel: "RQ"
     batch_size: 1000
     num_inducing: 1000
+    learning_rate: 0.03
+    iterations: 300

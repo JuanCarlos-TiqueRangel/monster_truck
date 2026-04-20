@@ -10,7 +10,11 @@ class SVGPModel(gpytorch.models.ApproximateGP):
     def __init__(self, inducing_points: torch.Tensor, kernel: str = "RBF"):
         input_dim = inducing_points.shape[-1]
 
-        variational_distribution = gpytorch.variational.CholeskyVariationalDistribution(
+        # variational_distribution = gpytorch.variational.CholeskyVariationalDistribution(
+        #     num_inducing_points=inducing_points.size(0)
+        # )
+
+        variational_distribution = gpytorch.variational.NaturalVariationalDistribution(
             num_inducing_points=inducing_points.size(0)
         )
 
@@ -118,15 +122,14 @@ class SVGPManager:
 
 
 
-    def partial_fit(self, X_new: np.ndarray, Y_new: np.ndarray, steps: int = 50, 
-                    replay_size: int = 256, batch_size: int | None = None, 
+    def partial_fit(self, X_new: np.ndarray, Y_new: np.ndarray, steps: int = 50,
+                    replay_size: int = 256, batch_size: int | None = None,
                     max_keep: int | None = None) -> None:
         """
         Warm-update the current SVGP with new data.
-        IMPORTANT:
-        - does NOT recompute normalization
-        - does NOT rebuild inducing points
-        - continues optimizing the current model
+        - Recomputes normalization on all stored data
+        - Re-maps inducing points from old to new normalized space
+        - Continues optimizing the current model
         """
 
         if not self.trained or self.model is None or self.likelihood is None:
@@ -156,7 +159,28 @@ class SVGPManager:
             self.Y_train = self.Y_train[-max_keep:]
 
         # -------------------------------------------------
-        # IMPORTANT: reuse OLD normalization
+        # Recompute normalization and re-map inducing points
+        # -------------------------------------------------
+        old_X_mean = self.X_mean.clone()
+        old_X_std = self.X_std.clone()
+        old_Y_std = self.Y_std.clone()
+
+        self._compute_normalization()
+
+        # Transform inducing points: old normalized -> raw -> new normalized
+        Z = self.model.variational_strategy.inducing_points.data
+        Z_raw = Z * old_X_std + old_X_mean
+        Z_new = (Z_raw - self.X_mean) / self.X_std
+        self.model.variational_strategy.inducing_points.data.copy_(Z_new)
+
+        # Rescale likelihood noise to match new Y scale ratio
+        scale_ratio = (old_Y_std / self.Y_std) ** 2
+        with torch.no_grad():
+            old_noise = self.likelihood.noise_covar.raw_noise.data
+            self.likelihood.noise_covar.raw_noise.data = old_noise + torch.log(scale_ratio)
+
+        # -------------------------------------------------
+        # Normalize new + replay data with UPDATED stats
         # -------------------------------------------------
         Xn_new = (X_new - self.X_mean) / self.X_std
         Yn_new = (Y_new - self.Y_mean) / self.Y_std
@@ -184,12 +208,8 @@ class SVGPManager:
             Xn_mix = Xn_new
             Yn_mix = Yn_new
 
-        # Keep cached normalized full dataset roughly consistent
-        self.Xn = (self.X_train - self.X_mean) / self.X_std
-        self.Yn = (self.Y_train - self.Y_mean) / self.Y_std
-
-        self._continue_optimization(x=Xn_mix, y=Yn_mix, 
-                                    total_num_data=self.X_train.shape[0], 
+        self._continue_optimization(x=Xn_mix, y=Yn_mix,
+                                    total_num_data=self.X_train.shape[0],
                                     steps=steps, batch_size=batch_size)
 
         self.trained = True
@@ -215,9 +235,15 @@ class SVGPManager:
 
         bs = self.batch_size if batch_size is None else batch_size
 
-        optimizer = torch.optim.Adam(
+        variational_ngd_optimizer = gpytorch.optim.NGD(
+            self.model.variational_parameters(),
+            num_data=total_num_data,
+            lr=0.1,
+        )
+
+        hyperparameter_optimizer = torch.optim.Adam(
             [
-                {"params": self.model.parameters()},
+                {"params": self.model.hyperparameters()},
                 {"params": self.likelihood.parameters()},
             ],
             lr=self.lr,
@@ -237,11 +263,15 @@ class SVGPManager:
                     xb = x[batch_idx]
                     yb = y[batch_idx]
 
-                    optimizer.zero_grad()
+                    variational_ngd_optimizer.zero_grad()
+                    hyperparameter_optimizer.zero_grad()
+
                     out = self.model(xb)
                     loss = -mll(out, yb)
                     loss.backward()
-                    optimizer.step()
+                    
+                    variational_ngd_optimizer.step()
+                    hyperparameter_optimizer.step()
 
         self.model.eval()
         self.likelihood.eval()
@@ -300,26 +330,33 @@ class SVGPManager:
         self.trained = True
 
 
-    def _optimize_gp(
-        self,
-        model: SVGPModel,
-        likelihood: gpytorch.likelihoods.GaussianLikelihood,
-        x: torch.Tensor,
-        y: torch.Tensor) -> None:
-        
+    def _optimize_gp(self, model: SVGPModel, likelihood: gpytorch.likelihoods.GaussianLikelihood, 
+                     x: torch.Tensor, y: torch.Tensor) -> None:
+
         model.train()
         likelihood.train()
 
-        optimizer = torch.optim.Adam(
+        num_data = y.size(0)
+
+        variational_ngd_optimizer = gpytorch.optim.NGD(
+            model.variational_parameters(),
+            num_data=num_data,
+            lr=0.1,
+        )
+
+        hyperparameter_optimizer = torch.optim.Adam(
             [
-                {"params": model.parameters()},
+                {"params": model.hyperparameters()},
                 {"params": likelihood.parameters()},
             ],
             lr=self.lr,
         )
 
-        num_data = y.size(0)
-        mll = gpytorch.mlls.VariationalELBO(likelihood, model, num_data=num_data)
+        mll = gpytorch.mlls.VariationalELBO(
+            likelihood,
+            model,
+            num_data=num_data,
+        )
 
         with gpytorch.settings.cholesky_jitter(1e-3, 1e-6):
             for _ in range(self.iters):
@@ -333,14 +370,19 @@ class SVGPManager:
                     xb = x[batch_idx]
                     yb = y[batch_idx]
 
-                    optimizer.zero_grad()
+                    variational_ngd_optimizer.zero_grad()
+                    hyperparameter_optimizer.zero_grad()
+
                     out = model(xb)
                     loss = -mll(out, yb)
                     loss.backward()
-                    optimizer.step()
+
+                    variational_ngd_optimizer.step()
+                    hyperparameter_optimizer.step()
 
         model.eval()
         likelihood.eval()
+
 
     # ----- Torch-friendly predict (for MPPI on GPU) -----
     def predict_torch(self, X):
@@ -353,9 +395,9 @@ class SVGPManager:
         with torch.no_grad(), gpytorch.settings.cholesky_jitter(1e-3, 1e-6):
             pred = self.likelihood(self.model(Xn))
             mean = pred.mean * self.Y_std + self.Y_mean
-            # var = pred.variance * (self.Y_std ** 2)
+            var = pred.variance * (self.Y_std ** 2)
 
-        return mean  # , var
+        return mean, var
 
     # ====================================================
     #           SAVE / LOAD FOR REUSE
