@@ -139,32 +139,6 @@ def _load_seed_npz( seed_npz_path: str, keys_needed: List[str],
 
 
 
-
-def _keep_recent_episodes(pitch: np.ndarray, pitch_dot: np.ndarray, xpos: np.ndarray, 
-                          xpos_dot: np.ndarray, u: np.ndarray, ep: np.ndarray, window_episodes: int):
-    """
-    Keep only samples belonging to the most recent `window_episodes` episode IDs.
-    """
-    ep = np.asarray(ep, dtype=np.int64).reshape(-1)
-    if ep.size == 0:
-        return pitch, pitch_dot, xpos, xpos_dot, u, ep
-
-    last_ep = int(ep.max())
-    first_keep_ep = last_ep - int(window_episodes) + 1
-
-    keep = ep >= first_keep_ep
-
-    return (
-        np.asarray(pitch)[keep],
-        np.asarray(pitch_dot)[keep],
-        np.asarray(xpos)[keep],
-        np.asarray(xpos_dot)[keep],
-        np.asarray(u)[keep],
-        ep[keep],
-    )
-
-
-
 # --------------------------------------------------------------
 # MAIN MODULAR API
 # --------------------------------------------------------------
@@ -300,29 +274,6 @@ class GPRetrainManager:
         flip, rate, x, vx, u, ep = dataset.snapshot()
         dataset.save_npz(episode_id, flip, rate, x, vx, u, ep)
 
-        # -------------------------------------------------
-        # Keep only the most recent W episodes
-        # -------------------------------------------------
-        W = int(getattr(self.cfg, "recent_episodes_window", 10))
-        flip, rate, x, vx, u, ep = _keep_recent_episodes(
-            flip, rate, x, vx, u, ep, window_episodes=W
-        )
-
-        # Optional safety cap by number of points after episode filtering
-        M = int(self.cfg.max_points_for_train)
-        if len(ep) > M:
-            flip, rate, x, vx, u, ep = dataset.cap_window(M, flip, rate, x, vx, u, ep)
-
-        # Require a minimum number of distinct episodes in the current window
-        min_eps = int(getattr(self.cfg, "min_episodes_in_window_to_train", 3))
-        n_eps_in_window = len(np.unique(ep))
-        if n_eps_in_window < min_eps:
-            if self.logger:
-                self.logger.info(
-                    f"Not enough episodes in sliding window yet: {n_eps_in_window} < {min_eps}"
-                )
-            return False
-
         self.training = True
         n_at_start = n
 
@@ -433,6 +384,10 @@ class GPRetrainManager:
                 gp_xpos_dot = SVGPManager.load(self.cfg.gp_xpos_dot_path, device=self.device)
                 gp_pitch = SVGPManager.load(self.cfg.gp_pitch_path, device=self.device)
                 gp_pitch_dot = SVGPManager.load(self.cfg.gp_pitch_dot_path, device=self.device)
+
+                # online_steps = how long to update
+                # replay_size = how much old data to mix in
+                # max_keep = how much total history to retain
 
                 online_steps = int(getattr(self.cfg, "online_update_steps", 50))
                 replay_size = int(getattr(self.cfg, "online_replay_size", 256))

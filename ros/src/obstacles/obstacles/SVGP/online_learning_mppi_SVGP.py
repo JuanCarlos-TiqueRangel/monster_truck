@@ -52,14 +52,16 @@ class MPPIConfig:
     num_rollouts: int = 2000
 
     # MPPI hyper-parameters
-    lambda_: float = 500.0
+    lambda_: float = 100
     # sigma: float = 1.6
-    sigma: float = 0.3
+    sigma: float = 0.6
 
 
     # Action bounds
     u_min: float = 0.0
     u_max: float = 1.0
+    u_max_start: float = 0.3
+    u_max_ramp_episodes: int = 15
 
     # Target / stop conditions
     goal_x: float = 5.0
@@ -79,30 +81,27 @@ class MPPIConfig:
 
     # ---- retrain ----
     min_points_to_train: int = 20
-    N_target_train: int = 1000
+    N_target_train: int = 10000
     train_kernel: str = cfg_params.gp.kernel
-    train_iters: int = 300
-    train_lr: float = 0.03
-    train_num_inducing: int = 64
-    train_batch_size: int | None = 256
+    train_iters: int = cfg_params.gp.iterations
+    train_lr: float = cfg_params.gp.learning_rate
+    train_num_inducing: int = cfg_params.gp.num_inducing
+    train_batch_size: int | None = cfg_params.gp.batch_size
     gp_target_mode: str = cfg_params.gp.type_of_data
 
-    max_points_for_train: int = 50_000
     min_new_points_between_trains: int = 20
 
     # ---- live learning curve plot ----
     live_plot: bool = True
     live_plot_save_png: bool = True
 
-    episode_timeout_sec: float = 60.0   # hard timeout for an episode (s)
+    episode_timeout_sec: float = 20.0   # hard timeout for an episode (s)
 
     # ---- seed dataset (initial offline run) ----
     # Keep this path only if the referenced file exists in your project.
     seed_npz_path: str = str(DATA_DIR / cfg_params.files.ini_data_file)
     seed_episode_id: int = -1
     keep_seed: bool = True
-
-    retrain_every_episodes: int = 1   # or 20
 
     # ---- weights that worked with low obstacle ----
     w_u: float = 7.1
@@ -111,28 +110,22 @@ class MPPIConfig:
     w_pitch_dot: float = 32.0
     w_goal: float = 10.0
     w_xpos_dot = 20.0
-
-    # w_u: float = 200.1
-    # w_du: float = 105.0
-    # w_pitch = 10.0
-    # w_pitch_dot: float = 32.0
-    # w_goal: float = 10.0
-    # w_xpos_dot = 20.0
+    w_uncertainty: float = 450.0
+    beta_safety: float = 10.0
 
     x_min_terminate: float = -3.0
 
     live_plot_mode: str = "both"
-    just_gp_model: bool = True
+    just_gp_model: bool = False
     stop_re_training_mode: bool = False
 
-    online_update_steps = 30
-    online_replay_size = 256
+    online_update_steps = 50
+    online_replay_size = 1024
     online_max_keep_points = 20000
     full_retrain_every_episodes = 10
-    recent_episodes_window: int = 10
-    min_episodes_in_window_to_train: int = 3
     retrain_every_episodes: int = 1
     max_points_for_train = 20000
+
 
 # ============================================================
 # MPPI Controller Node
@@ -391,7 +384,6 @@ class MPPICarControllerNode(Node):
             self.publish_u(0.0)
 
             self.dataset.drop_episode(self.episode_id)
-
             self.request_reset()
             return
 
@@ -425,7 +417,7 @@ class MPPICarControllerNode(Node):
                 print("[SUCCESS] !!!")
                 self.publish_u(0.0)
 
-                self.dataset.drop_episode(self.episode_id)
+                #self.dataset.drop_episode(self.episode_id)
                 self._record_episode_metric(retrain_started=True, success=1)
                 self.request_reset()
                 return
@@ -434,6 +426,7 @@ class MPPICarControllerNode(Node):
         # -------------------------------------------------
         # Episode timeout - NOT useful retrain for SVGP
         # -------------------------------------------------
+        #if self.cfg.re_training_mode:
         if self.episode_start_time is not None:
             elapsed_ep = (self.get_clock().now() - self.episode_start_time).nanoseconds * 1e-9
             if elapsed_ep >= float(cfg.episode_timeout_sec):
@@ -460,22 +453,20 @@ class MPPICarControllerNode(Node):
 
                 self.request_reset(force=True)
                 return
+        # else:
+        #     if self.episode_start_time is not None:
+        #         elapsed_ep = (self.get_clock().now() - self.episode_start_time).nanoseconds * 1e-9
+        #         if elapsed_ep >= float(cfg.episode_timeout_sec):
+        #             self.get_logger().warn(
+        #                 f"Episode {int(self.episode_id)} TIMEOUT after {elapsed_ep:.2f}s "
+        #                 f"(limit={cfg.episode_timeout_sec:.2f}s). Forcing reset."
+        #             )
 
-
-        # if self.episode_start_time is not None:
-        #     elapsed_ep = (self.get_clock().now() - self.episode_start_time).nanoseconds * 1e-9
-        #     if elapsed_ep >= float(cfg.episode_timeout_sec):
-        #         self.get_logger().warn(
-        #             f"Episode {int(self.episode_id)} TIMEOUT after {elapsed_ep:.2f}s "
-        #             f"(limit={cfg.episode_timeout_sec:.2f}s). Forcing reset."
-        #         )
-
-        #         self.dataset.drop_episode(self.episode_id)
-        #         self._record_episode_metric(retrain_started=True, success=0)
-        #         self.publish_u(0.0)
-
-        #         self.request_reset(force=True)
-        #         return
+        #             self.dataset.drop_episode(self.episode_id)
+        #             self._record_episode_metric(retrain_started=True, success=0)
+        #             self.publish_u(0.0)
+        #             self.request_reset(force=True)
+        #             return
             
 
 
@@ -514,7 +505,6 @@ class MPPICarControllerNode(Node):
 
                 # remove this bad episode from training buffer
                 self.dataset.drop_episode(self.episode_id)
-
                 self._record_episode_metric(retrain_started=False, success=0)
                 self.request_reset()
                 return

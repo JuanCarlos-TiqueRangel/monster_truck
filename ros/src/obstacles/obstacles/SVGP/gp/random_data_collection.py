@@ -32,10 +32,10 @@ class Config:
     sample_dt: float = 0.1          # [s] 50 Hz logging + random input update
 
     # Re-publish held command at this rate
-    cmd_pub_hz: float = 50.0         # [Hz]
+    cmd_pub_hz: float = 5.0         # [Hz]
 
     # Random input range
-    u_min: float = -1.0
+    u_min: float = 0.0
     u_max: float = 1.0
 
     # Run duration in wall-clock seconds

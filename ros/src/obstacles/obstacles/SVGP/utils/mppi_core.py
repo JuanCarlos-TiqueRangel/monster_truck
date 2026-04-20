@@ -87,7 +87,8 @@ class MPPICore:
 
     # COST FUNCTION FOR OBSTACLED
 
-    def stage_cost_torch(self, states: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+    def stage_cost_torch(self, states: torch.Tensor, actions: torch.Tensor,
+                         uncertainty: torch.Tensor | None = None) -> torch.Tensor:
         # xpos, xpos_dot, pitch, pitch_dot
         xpos = states[:, 0]
         xpos_dot = states[:, 1]
@@ -106,7 +107,13 @@ class MPPICore:
         progress = -float(self.cfg.w_xpos_dot) * xpos_dot * torch.sign(float(self.cfg.goal_x) - xpos)
         cost_u = float(self.cfg.w_u) * (u ** 2)
 
-        return cost_goal + cost_u #+ cost_pitch_dot + cost_pitch
+        cost = cost_goal + cost_u + cost_pitch_dot + cost_pitch
+
+        if uncertainty is not None:
+            w_unc = float(getattr(self.cfg, 'w_uncertainty', 50.0))
+            cost = cost + w_unc * uncertainty
+
+        return cost
 
 
 
@@ -117,27 +124,33 @@ class MPPICore:
         pitch = states[:, 2]
         pitch_dot = states[:, 3]
 
-        #dt = float(self.cfg.ctrl_dt)
-
         # X: (K,5) = [xpos, xpos_dot, pitch, pitch_dot, u]
         X = torch.stack([xpos, xpos_dot, pitch, pitch_dot, actions], dim=-1)
 
-        dxpos_mean   = self.gp_xpos.predict_torch(X)
-        dxpos_dot_mean   = self.gp_xpos_dot.predict_torch(X)
-        dpitch_mean    = self.gp_pitch.predict_torch(X)
-        dpitch_dot_mean    = self.gp_pitch_dot.predict_torch(X)
+        dxpos_mean, dxpos_var       = self.gp_xpos.predict_torch(X)
+        dxpos_dot_mean, dxpos_dot_var = self.gp_xpos_dot.predict_torch(X)
+        dpitch_mean, dpitch_var     = self.gp_pitch.predict_torch(X)
+        dpitch_dot_mean, dpitch_dot_var = self.gp_pitch_dot.predict_torch(X)
+
+        beta = float(getattr(self.cfg, 'beta_safety', 3.0))
+
+        dpitch_std = torch.sqrt(dpitch_var)
+        dpitch_dot_std = torch.sqrt(dpitch_dot_var)
 
         next_states = torch.empty_like(states)
         next_states[:, 0] = xpos        + dxpos_mean
         next_states[:, 1] = xpos_dot    + dxpos_dot_mean
-        next_states[:, 2] = pitch       + dpitch_mean
-        next_states[:, 3] = pitch_dot   + dpitch_dot_mean
+        next_states[:, 2] = pitch       + dpitch_mean + beta * dpitch_std
+        next_states[:, 3] = pitch_dot   + dpitch_dot_mean + beta * dpitch_dot_std
 
         # reasonable clamps (tune)
         next_states[:, 2].clamp_(-math.pi, math.pi)
         next_states[:, 3].clamp_(-20.0, 20.0)
 
-        return next_states
+        total_std = (torch.sqrt(dxpos_var) + torch.sqrt(dxpos_dot_var) +
+                     dpitch_std + dpitch_dot_std)
+
+        return next_states, total_std
 
 
     @torch.no_grad()
@@ -160,8 +173,9 @@ class MPPICore:
 
         for t in range(H):
             u_t = U[:, t]
-            costs = costs + self.stage_cost_torch(states, u_t)
-            states = self.gp_step_batch_torch(states, u_t)
+            next_states, step_var = self.gp_step_batch_torch(states, u_t)
+            costs = costs + self.stage_cost_torch(states, u_t, uncertainty=step_var)
+            states = next_states
 
         # --- control smoothness penalty ---
         u_diff = U[:, 1:] - U[:, :-1]            # (K, H-1)

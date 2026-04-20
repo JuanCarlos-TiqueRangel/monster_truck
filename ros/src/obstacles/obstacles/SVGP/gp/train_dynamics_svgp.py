@@ -45,8 +45,8 @@ class TrainConfig:
     iters: int = 300
 
     # ---- SVGP-specific ----
-    num_inducing: int = 128
-    batch_size: int | None = 256   # None -> full batch
+    num_inducing: int = cfg_params.gp.num_inducing
+    batch_size: int | None = cfg_params.gp.batch_size   # None -> full batch
 
     out_dir: str = "models"
     prefix: str = "svgp_dynamics"  # saved as f"{prefix}_{name}.pt"
@@ -250,11 +250,11 @@ if __name__ == "__main__":
         N_target=1000,
 
         kernel=cfg_params.gp.kernel,
-        lr=0.03,
-        iters=300,
+        lr=cfg_params.gp.learning_rate,
+        iters=cfg_params.gp.iterations,
 
-        num_inducing=128,
-        batch_size=256,   # use None if you want full-batch SVGP training
+        num_inducing= cfg_params.gp.num_inducing,
+        batch_size= cfg_params.gp.batch_size,   # use None if you want full-batch SVGP training
 
         out_dir="models",
         prefix="svgp_dynamics",
