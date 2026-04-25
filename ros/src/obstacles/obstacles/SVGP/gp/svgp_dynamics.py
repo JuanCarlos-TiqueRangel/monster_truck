@@ -10,11 +10,7 @@ class SVGPModel(gpytorch.models.ApproximateGP):
     def __init__(self, inducing_points: torch.Tensor, kernel: str = "RBF"):
         input_dim = inducing_points.shape[-1]
 
-        # variational_distribution = gpytorch.variational.CholeskyVariationalDistribution(
-        #     num_inducing_points=inducing_points.size(0)
-        # )
-
-        variational_distribution = gpytorch.variational.NaturalVariationalDistribution(
+        variational_distribution = gpytorch.variational.CholeskyVariationalDistribution(
             num_inducing_points=inducing_points.size(0)
         )
 
@@ -27,7 +23,8 @@ class SVGPModel(gpytorch.models.ApproximateGP):
 
         super().__init__(variational_strategy)
 
-        self.mean_module = gpytorch.means.LinearMean(input_size=input_dim)
+        #self.mean_module = gpytorch.means.LinearMean(input_size=input_dim)
+        self.mean_module = gpytorch.means.ConstantMean()
 
         if kernel == "RBF":
             base_kernel = gpytorch.kernels.RBFKernel(ard_num_dims=input_dim)
@@ -235,15 +232,9 @@ class SVGPManager:
 
         bs = self.batch_size if batch_size is None else batch_size
 
-        variational_ngd_optimizer = gpytorch.optim.NGD(
-            self.model.variational_parameters(),
-            num_data=total_num_data,
-            lr=0.1,
-        )
-
-        hyperparameter_optimizer = torch.optim.Adam(
+        optimizer = torch.optim.Adam(
             [
-                {"params": self.model.hyperparameters()},
+                {"params": self.model.parameters()},
                 {"params": self.likelihood.parameters()},
             ],
             lr=self.lr,
@@ -263,15 +254,11 @@ class SVGPManager:
                     xb = x[batch_idx]
                     yb = y[batch_idx]
 
-                    variational_ngd_optimizer.zero_grad()
-                    hyperparameter_optimizer.zero_grad()
-
+                    optimizer.zero_grad()
                     out = self.model(xb)
                     loss = -mll(out, yb)
                     loss.backward()
-                    
-                    variational_ngd_optimizer.step()
-                    hyperparameter_optimizer.step()
+                    optimizer.step()
 
         self.model.eval()
         self.likelihood.eval()
@@ -321,16 +308,13 @@ class SVGPManager:
 
         inducing_points = self._select_inducing_points(self.Xn)
 
-        self.model = SVGPModel(
-            inducing_points=inducing_points,
-            kernel=self.kernel,
-        ).to(self.device)
+        self.model = SVGPModel(inducing_points=inducing_points, kernel=self.kernel).to(self.device)
 
         self._optimize_gp(self.model, self.likelihood, self.Xn, self.Yn)
         self.trained = True
 
 
-    def _optimize_gp(self, model: SVGPModel, likelihood: gpytorch.likelihoods.GaussianLikelihood, 
+    def _optimize_gp(self, model: SVGPModel, likelihood: gpytorch.likelihoods.GaussianLikelihood,
                      x: torch.Tensor, y: torch.Tensor) -> None:
 
         model.train()
@@ -338,25 +322,15 @@ class SVGPManager:
 
         num_data = y.size(0)
 
-        variational_ngd_optimizer = gpytorch.optim.NGD(
-            model.variational_parameters(),
-            num_data=num_data,
-            lr=0.1,
-        )
-
-        hyperparameter_optimizer = torch.optim.Adam(
+        optimizer = torch.optim.Adam(
             [
-                {"params": model.hyperparameters()},
+                {"params": model.parameters()},
                 {"params": likelihood.parameters()},
             ],
             lr=self.lr,
         )
 
-        mll = gpytorch.mlls.VariationalELBO(
-            likelihood,
-            model,
-            num_data=num_data,
-        )
+        mll = gpytorch.mlls.VariationalELBO(likelihood, model, num_data=num_data)
 
         with gpytorch.settings.cholesky_jitter(1e-3, 1e-6):
             for _ in range(self.iters):
@@ -370,15 +344,11 @@ class SVGPManager:
                     xb = x[batch_idx]
                     yb = y[batch_idx]
 
-                    variational_ngd_optimizer.zero_grad()
-                    hyperparameter_optimizer.zero_grad()
-
+                    optimizer.zero_grad()
                     out = model(xb)
                     loss = -mll(out, yb)
                     loss.backward()
-
-                    variational_ngd_optimizer.step()
-                    hyperparameter_optimizer.step()
+                    optimizer.step()
 
         model.eval()
         likelihood.eval()
@@ -395,9 +365,9 @@ class SVGPManager:
         with torch.no_grad(), gpytorch.settings.cholesky_jitter(1e-3, 1e-6):
             pred = self.likelihood(self.model(Xn))
             mean = pred.mean * self.Y_std + self.Y_mean
-            var = pred.variance * (self.Y_std ** 2)
+            #var = pred.variance * (self.Y_std ** 2)
 
-        return mean, var
+        return mean #, var
 
     # ====================================================
     #           SAVE / LOAD FOR REUSE
