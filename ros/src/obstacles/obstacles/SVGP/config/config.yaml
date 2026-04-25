@@ -12,13 +12,19 @@ models:
     pitch: "svgp_dynamics_pitch_delta.pt"
     pitch_dot: "svgp_dynamics_pitch_dot_delta.pt"
 
+mppi:
+    horizon: 30
+    num_rollouts: 2000
+    lambda_: 500
+    sigma: 0.3
+
 gp:
     input: ["xpos", "xpos_dot", "pitch", "pitch_dot", "u"]
     output: ["xpos", "xpos_dot", "pitch", "pitch_dot"]
     sample_time_dt: 0.1
     type_of_data: "delta"
     kernel: "RQ"
-    batch_size: 1000
-    num_inducing: 1000
-    learning_rate: 0.03
+    batch_size: 64
+    num_inducing: 256
+    learning_rate: 0.01
     iterations: 300

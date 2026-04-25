@@ -48,20 +48,18 @@ from utils.episode_metrics import EpisodeMetricsWriter
 class MPPIConfig:
     # Timing
     ctrl_dt: float = cfg_params.gp.sample_time_dt
-    horizon: int = 30
-    num_rollouts: int = 2000
+    horizon: int = cfg_params.mppi.horizon
+    num_rollouts: int = cfg_params.mppi.num_rollouts
 
     # MPPI hyper-parameters
-    lambda_: float = 100
+    lambda_: float = cfg_params.mppi.lambda_
     # sigma: float = 1.6
-    sigma: float = 0.6
+    sigma: float = cfg_params.mppi.sigma
 
 
     # Action bounds
     u_min: float = 0.0
     u_max: float = 1.0
-    u_max_start: float = 0.3
-    u_max_ramp_episodes: int = 15
 
     # Target / stop conditions
     goal_x: float = 5.0
@@ -80,8 +78,8 @@ class MPPIConfig:
     max_log_points: int = 200_000
 
     # ---- retrain ----
-    min_points_to_train: int = 20
-    N_target_train: int = 10000
+    min_points_to_train: int = 60
+    N_target_train: int = 1000
     train_kernel: str = cfg_params.gp.kernel
     train_iters: int = cfg_params.gp.iterations
     train_lr: float = cfg_params.gp.learning_rate
@@ -95,7 +93,7 @@ class MPPIConfig:
     live_plot: bool = True
     live_plot_save_png: bool = True
 
-    episode_timeout_sec: float = 20.0   # hard timeout for an episode (s)
+    episode_timeout_sec: float = 15.0   # hard timeout for an episode (s)
 
     # ---- seed dataset (initial offline run) ----
     # Keep this path only if the referenced file exists in your project.
@@ -104,14 +102,12 @@ class MPPIConfig:
     keep_seed: bool = True
 
     # ---- weights that worked with low obstacle ----
-    w_u: float = 7.1
-    w_du: float = 15.0
+    w_u: float = 20.0 #7.1
+    w_du: float = 50.0 #15.0
     w_pitch = 10.0
     w_pitch_dot: float = 32.0
     w_goal: float = 10.0
     w_xpos_dot = 20.0
-    w_uncertainty: float = 450.0
-    beta_safety: float = 10.0
 
     x_min_terminate: float = -3.0
 
@@ -122,8 +118,8 @@ class MPPIConfig:
     online_update_steps = 50
     online_replay_size = 1024
     online_max_keep_points = 20000
-    full_retrain_every_episodes = 10
-    retrain_every_episodes: int = 1
+    full_retrain_every_episodes = 5
+    retrain_every_episodes: int = 1000000
     max_points_for_train = 20000
 
 
@@ -396,7 +392,7 @@ class MPPICarControllerNode(Node):
                 self.publish_u(0.0)
 
                 ep_num = self.episode_id + 1
-                do_retrain_now = (cfg.retrain_every_episodes > 0) and (ep_num % cfg.retrain_every_episodes == 0)
+                do_retrain_now = (cfg.full_retrain_every_episodes > 0) and (ep_num % cfg.full_retrain_every_episodes == 0)
 
                 started = False
                 if do_retrain_now:
@@ -436,7 +432,7 @@ class MPPICarControllerNode(Node):
                 )
 
                 ep_num = self.episode_id + 1
-                do_retrain_now = (cfg.retrain_every_episodes > 0) and (ep_num % cfg.retrain_every_episodes == 0)
+                do_retrain_now = (cfg.full_retrain_every_episodes > 0) and (ep_num % cfg.full_retrain_every_episodes == 0)
 
                 started = False
                 if do_retrain_now:
@@ -478,14 +474,14 @@ class MPPICarControllerNode(Node):
                 self.publish_u(0.0)
 
                 ep_num = self.episode_id + 1
-                do_retrain_now = (cfg.retrain_every_episodes > 0) and (ep_num % cfg.retrain_every_episodes == 0)
+                do_retrain_now = (cfg.full_retrain_every_episodes > 0) and (ep_num % cfg.full_retrain_every_episodes == 0)
 
                 started = False
                 if do_retrain_now:
                     started = self.retrain.maybe_start_retrain_async(self.dataset, episode_id=self.episode_id, force=True)
                 else:
                     self.get_logger().info(
-                        f"Skipping retrain this episode (ep_num={ep_num}). retrain_every_episodes={cfg.retrain_every_episodes}"
+                        f"Skipping retrain this episode (ep_num={ep_num}). full_retrain_every_episodes={cfg.full_retrain_every_episodes}"
                     )
 
                 self._record_episode_metric(retrain_started=started, success=0)

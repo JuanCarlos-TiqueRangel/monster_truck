@@ -115,7 +115,7 @@ class MPPIConfig:
     x_min_terminate: float = -3.0
 
     live_plot_mode: str = "both"
-    just_gp_model: bool = False
+    just_gp_model: bool = True
     stop_re_training_mode: bool = False
 
 
