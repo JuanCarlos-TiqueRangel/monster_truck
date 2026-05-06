@@ -1,0 +1,20 @@
+# configuration files for folders and file names
+
+files:
+    mujoco_model: "planar_monstertruck.xml"
+    ini_data_file: "mujoco_random_obstacles.npz"
+    # ini_data_file: "dataset_ep0060.npz"
+    # ini_data_file: "dataset_ep0082.npz"
+
+models: 
+    xpos_dot: "gp_dynamics_xpos_dot_delta.pt"
+    pitch_dot: "gp_dynamics_pitch_dot_delta.pt"
+
+gp:
+    sample_time_dt: 0.1
+    type_of_data: "delta"
+    input_keys: ["xpos", "xpos_dot", "pitch", "pitch_dot", "u"]
+    output_keys: ["xpos_dot", "pitch_dot"]
+    kernel: "RQ"
+    batch_size: 1000
+    num_inducing: 1000

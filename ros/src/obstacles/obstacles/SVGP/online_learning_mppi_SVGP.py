@@ -79,7 +79,7 @@ class MPPIConfig:
 
     # ---- retrain ----
     min_points_to_train: int = 60
-    N_target_train: int = 1000
+    N_target_train: int = 10000
     train_kernel: str = cfg_params.gp.kernel
     train_iters: int = cfg_params.gp.iterations
     train_lr: float = cfg_params.gp.learning_rate
