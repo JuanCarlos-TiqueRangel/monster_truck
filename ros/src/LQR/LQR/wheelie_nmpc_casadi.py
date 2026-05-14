@@ -38,14 +38,14 @@ except ImportError as exc:
 
 @dataclass
 class WheelieParams:
-    m: float = 2.0          # total mass of the vehicle
+    m: float = 5.1          # total mass of the vehicle
     l: float = 0.18         # rear axle to COM DISTANCE
-    I_body: float = 0.04    #
-    r: float = 0.05         #
+    I_body: float = (1/12)*(m)*(0.53**2 + 0.30**2)    #Inertia calculation I_body = 1/12 * mass(Lenght^2 + Height^2) 0.04
+    r: float = 0.085         #
     g: float = 9.81         #
     c_v: float = 9.0        #
-    tau_min: float = -4.0
-    tau_max: float = 4.0
+    tau_min: float = -8.0
+    tau_max: float = 12.0
     theta_min: float = math.radians(0.0)
     theta_max: float = math.radians(100.0)
     omega_min: float = -8.0
@@ -53,7 +53,7 @@ class WheelieParams:
     v_min: float = -4.0
     v_max: float = 4.0
 
-    pitch_ref: float = 60.0
+    pitch_ref: float = 90.0
     sim_time: float = 5.0
     sim_dt: float = 0.1
 
@@ -68,12 +68,12 @@ class MPCConfig:
     N: int = 35
     q_x: float = 0.0
     q_v: float = 0.01
-    q_theta: float = 500.0
-    q_omega: float = 100.0
-    r_tau: float = 0.01
-    r_dtau: float = 1.0
+    q_theta: float = 1000.0
+    q_omega: float = 15.0
+    r_tau: float = 0.1
+    r_dtau: float = 0.01
     q_terminal_theta: float = 400.0
-    q_terminal_omega: float = 80.0
+    q_terminal_omega: float = 100.0
     ipopt_max_iter: int = 50
 
 
