@@ -27,15 +27,15 @@ import matplotlib.pyplot as plt
 
 @dataclass
 class WheelieParams:
-    m: float = 2.0          # kg
+    m: float = 5.1          # kg
     l: float = 0.18         # m, rear axle to COM distance
-    I_body: float = 0.04    # kg*m^2, body inertia about COM
-    r: float = 0.05         # m, rear wheel radius
+    I_body: float = (1/12)*(m)*(0.53**2 + 0.30**2)    # kg*m^2, body inertia about COM I_body = 1/12 * mass(Lenght^2 + Height^2)
+    r: float = 0.085         # m, rear wheel radius
     g: float = 9.81         # m/s^2
-    tau_min: float = -4.0   # N*m
-    tau_max: float = 4.0    # N*m
-    pitch_ref: float = 90.0
     c_v: float = 9.0 
+    tau_min: float = -8.0   # N*m
+    tau_max: float = 12.0    # N*m
+    pitch_ref: float = 90.0
 
     sim_time: float = 5.0
     sim_dt: float = 0.1
