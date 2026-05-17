@@ -109,3 +109,6 @@ ERROR: could not initialize GLFW
 Mon May  4 22:13:19 2026
 ERROR: could not initialize GLFW
 
+Fri May 15 20:44:34 2026
+ERROR: gladLoadGL error
+
