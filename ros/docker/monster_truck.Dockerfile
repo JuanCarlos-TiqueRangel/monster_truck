@@ -3,8 +3,8 @@ FROM osrf/ros:jazzy-desktop
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
-# For headless MuJoCo rendering
-ENV MUJOCO_GL=osmesa
+# # For headless MuJoCo rendering
+# ENV MUJOCO_GL=osmesa
 
 # --- system deps for pip + MuJoCo rendering on Ubuntu 24.04 ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
