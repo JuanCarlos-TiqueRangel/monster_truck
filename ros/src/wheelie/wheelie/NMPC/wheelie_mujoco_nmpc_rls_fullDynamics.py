@@ -17,26 +17,24 @@ import casadi as ca
 # ============================================================
 
 XML_PATH = Path(__file__).with_name("monster_truck_flip_2d.xml")
-CSV_PATH = Path(__file__).with_name("wheelie_mujoco_log.csv")
+CSV_PATH = Path(__file__).with_name("wheelie_mujoco_rls_fullDynamics.csv")
 
-RENDER = True                 # True = open MuJoCo viewer, False = headless
-SIM_TIME = 25.0                # seconds
-CTRL_DT = 0.05                # NMPC update period [s]
+RENDER = True
+SIM_TIME = 40.0
+CTRL_DT = 0.05
 PRINT_EVERY_N_CONTROLS = 5
 
 # Your MuJoCo root_pitch is negative during a backward wheelie.
 # This makes the controller see backward wheelie as positive pitch.
-
-#PITCH_SIGN = -1.0 # for wheelie using rear wheels
 PITCH_SIGN = -1.0
 
 # If the motor acts in the wrong direction, change this to -1.0.
 ACTUATOR_SIGN = -1.0
-TAU_TO_CTRL = 1.0             # controller torque-like command -> MuJoCo ctrl scale
+TAU_TO_CTRL = 1.0
 
 INITIAL_X = 0.0
-INITIAL_Z = 0.1512            # good starting height for this XML
-INITIAL_ROOT_PITCH_DEG = 0.0  # MuJoCo root_pitch initial angle
+INITIAL_Z = 0.1512
+INITIAL_ROOT_PITCH_DEG = 0.0
 
 PITCH_REF_DEG = 80.0
 V_REF = 0.0
@@ -49,19 +47,21 @@ V_REF = 0.0
 @dataclass
 class WheelieParams:
     m: float = 5.1
-    l: float = 0.2 #0.18
+    l: float = 0.2
     I_body: float = (1.0 / 12.0) * 5.1 * (0.53**2 + 0.30**2)
     r: float = 0.085
     g: float = 9.81
     c_v: float = 9.0
 
     tau_min: float = -8.0
-    tau_max: float = 8.0
+    tau_max: float = 12.0
 
     theta_min: float = math.radians(0.0)
-    theta_max: float = math.radians(120.0)
+    theta_max: float = math.radians(100.0)
+
     omega_min: float = -8.0
     omega_max: float = 8.0
+
     v_min: float = -5.0
     v_max: float = 5.0
 
@@ -69,41 +69,17 @@ class WheelieParams:
     def I_eff(self) -> float:
         return self.I_body + self.m * self.l**2
 
-    # dt: float = CTRL_DT
-    # N: int = 10
-    # q_x = 0.0
-    # q_v = 0.01
-    # q_theta = 1000.0
-    # q_omega = 15.0
-    # r_tau = 0.1
-    # r_dtau = 0.01
-    # q_terminal_theta = 400.0
-    # q_terminal_omega = 100.0
-    # ipopt_max_iter: int = 50
 
     # dt: float = CTRL_DT
     # N: int = 10
     # q_x: float = 5.0
     # q_v: float = 55.0
-    # q_theta: float = 1340.0
+    # q_theta: float = 340.0
     # q_omega: float = 0.1
-    # r_tau: float = 0.34867
+    # r_tau: float = 0.5
     # r_dtau: float = 2.5
-    # q_terminal_theta: float = 700.0
+    # q_terminal_theta: float = 150.0
     # q_terminal_omega: float = 0.1
-    # ipopt_max_iter: int = 50
-
-    # For wheelie using the front wheels
-    # dt: float = CTRL_DT
-    # N: int = 10
-    # q_x: float = 0.0
-    # q_v: float = 0.15
-    # q_theta: float = 1300.0
-    # q_omega: float = 2200.0
-    # r_tau: float = 0.18
-    # r_dtau: float = 1.60
-    # q_terminal_theta: float = 3500.0
-    # q_terminal_omega: float = 14000.0
     # ipopt_max_iter: int = 50
 
 @dataclass
@@ -112,13 +88,92 @@ class MPCConfig:
     N: int = 10
     q_x: float = 5.0
     q_v: float = 55.0
-    q_theta: float = 1340.0
+    q_theta: float = 540.0
     q_omega: float = 0.1
-    r_tau: float = 0.34867
+    r_tau: float = 0.5
     r_dtau: float = 2.5
-    q_terminal_theta: float = 700.0
+    q_terminal_theta: float = 250.0
     q_terminal_omega: float = 0.1
     ipopt_max_iter: int = 50
+
+
+# ============================================================
+# RLS in one function
+# ============================================================
+
+def rls_update(
+    state_prev: np.ndarray,
+    tau: float,
+    state_next: np.ndarray,
+    dt: float,
+    p: WheelieParams,
+    a: np.ndarray,
+    P: np.ndarray,
+    filtered_omega_dot: float | None,
+    forgetting_factor: float = 0.999,
+    derivative_alpha: float = 0.85,
+    clip_parameters: bool = True,
+) -> tuple[np.ndarray, np.ndarray, float, dict]:
+
+    _, v_prev, theta_prev, omega_prev = state_prev
+    omega_next = float(state_next[3])
+
+    # 1) Measured angular acceleration
+    omega_dot_raw = (omega_next - float(omega_prev)) / dt
+
+    # 2) Filter measured angular acceleration FIRST
+    filtered_omega_dot = omega_dot_raw
+
+    omega_dot_measured = float(filtered_omega_dot)
+
+    #3) Full dynamics target
+    full_target = omega_dot_measured
+
+    # 4) Feature vector: phi = [cos(theta), tau, omega, v, 1]
+    phi = np.array(
+        [np.cos(theta_prev), tau, omega_prev, v_prev, 1.0],
+        dtype=float,
+    )
+
+    # 5) RLS prediction of full omega dynamics
+    omega_dot_hat_before = float(phi @ a)
+    error_before = full_target - omega_dot_hat_before
+
+    # 6) RLS gain
+    P_phi = P @ phi
+    denom = forgetting_factor + float(phi @ P_phi)
+
+    if abs(denom) < 1e-12:
+        info = {
+            "omega_dot_raw": float(omega_dot_raw),
+            "y": float(omega_dot_measured),
+            "y_hat": float(omega_dot_hat_before),
+            "error": float(omega_dot_measured - omega_dot_hat_before),
+            "skipped": True,
+        }
+        return a, P, float(filtered_omega_dot), info
+
+    K = P_phi / denom
+
+    # 7) Update full-dynamics parameters
+    a = a + K * error_before
+
+    # 9) Covariance update
+    I = np.eye(5)
+    P = ((I - np.outer(K, phi)) @ P) / forgetting_factor
+    P = 0.5 * (P + P.T)
+
+    omega_dot_hat_after = float(phi @ a)
+
+    info = {
+        "omega_dot_raw": float(omega_dot_raw),
+        "y": float(omega_dot_measured),
+        "y_hat": float(omega_dot_hat_after),
+        "error": float(omega_dot_measured - omega_dot_hat_after),
+        "skipped": False,
+    }
+
+    return a, P, float(filtered_omega_dot), info
 
 
 # ============================================================
@@ -151,56 +206,66 @@ class WheelieNMPC:
         self.cfg = cfg
         self.nx = 4
         self.nu = 1
+        self.n_rls = 5
         self.last_solution = None
         self._build_solver()
 
-    def _f_ca(self, x, u):
+    def _f_ca(self, x, u, a_rls):
         p = self.p
-        # DYNAMICS x = [position, velocity, pitch, pitch_rate]
-        # Back wheels wheelie
-        xpos_dot = x[1]
-        velocity_dot = u[0] / (p.m * p.r) - p.c_v * x[1]
+        # State x = [position, velocity, pitch, pitch_rate]
+        x_dot = x[1]
+        v_dot = u[0] / (p.m * p.r) - p.c_v * x[1]
         theta_dot = x[3]
-        omega_dot = (-u[0] + p.m * p.g * p.l * ca.cos(x[2])) / p.I_eff
+        omega_dot = (
+            a_rls[0] * ca.cos(x[2])
+            + a_rls[1] * u[0]
+            + a_rls[2] * x[3]
+            + a_rls[3] * x[1]
+            + a_rls[4]
+        )
 
-        return ca.vertcat(xpos_dot, velocity_dot, theta_dot, omega_dot)
-    
+        return ca.vertcat(x_dot, v_dot, theta_dot, omega_dot)
 
-
-    def _rk4_ca(self, x, u):
+    def _rk4_ca(self, x, u, a_rls):
         dt = self.cfg.dt
-        k1 = self._f_ca(x, u)
-        k2 = self._f_ca(x + 0.5 * dt * k1, u)
-        k3 = self._f_ca(x + 0.5 * dt * k2, u)
-        k4 = self._f_ca(x + dt * k3, u)
-        x_next = x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-        return x_next
-
+        k1 = self._f_ca(x, u, a_rls)
+        k2 = self._f_ca(x + 0.5 * dt * k1, u, a_rls)
+        k3 = self._f_ca(x + 0.5 * dt * k2, u, a_rls)
+        k4 = self._f_ca(x + dt * k3, u, a_rls)
+        return x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
     def _build_solver(self):
-        p = self.p
         cfg = self.cfg
+        p = self.p
         N = cfg.N
 
         X = ca.SX.sym("X", self.nx, N + 1)
         U = ca.SX.sym("U", self.nu, N)
 
-        # P = [x, v, theta, omega, x_ref, v_ref, theta_ref, omega_ref, tau_prev]
-        P = ca.SX.sym("P", 9)
+        # Parameter vector:
+        # state [x, v, theta, omega]
+        # ref   [x_ref, v_ref, theta_ref, omega_ref]
+        # tau_prev
+        # RLS coefficients [a_g, a_tau, a_omega, a_v, a_0]
+        P = ca.SX.sym("P", 9 + self.n_rls)
+
         x0 = P[0:4]
         ref = P[4:8]
         tau_prev = P[8]
+        a_rls = P[9:14]
+
+        obj = 0
+        g = []
+
+        g.append(X[:, 0] - x0)
 
         Q = ca.diag(ca.vertcat(cfg.q_x, cfg.q_v, cfg.q_theta, cfg.q_omega))
         Qf = ca.diag(ca.vertcat(cfg.q_x, cfg.q_v, cfg.q_terminal_theta, cfg.q_terminal_omega))
 
-        cost = 0
-        constraints = [X[:, 0] - x0]
-
-        # Stage/running cost: applied at every predicted step
         for k in range(N):
             xk = X[:, k]
             uk = U[:, k]
+
             e = xk - ref
 
             if k == 0:
@@ -209,89 +274,113 @@ class WheelieNMPC:
                 du = uk[0] - U[0, k - 1]
 
             tau_eq = p.m * p.g * p.l * ca.cos(ref[2])
-            # Quadratic form x^TQX
-            cost += ca.mtimes([e.T, Q, e])
-            cost += cfg.r_tau * (uk[0] - tau_eq) ** 2
-            cost += cfg.r_dtau * du**2
 
-            x_next = self._rk4_ca(xk, uk)
-            constraints.append(X[:, k + 1] - x_next)
+            obj += ca.mtimes([e.T, Q, e])
+            obj += cfg.r_tau * uk[0] ** 2
+            obj += cfg.r_dtau * du ** 2
 
-        # Terminal cost: applied only once at the final predicted state.
+            x_next = self._rk4_ca(xk, uk, a_rls)
+            g.append(X[:, k + 1] - x_next)
+
+
         eN = X[:, N] - ref
-        # Quadratic form x^TQX
-        cost += ca.mtimes([eN.T, Qf, eN])
+        obj += ca.mtimes([eN.T, Qf, eN])
 
         opt_vars = ca.vertcat(ca.reshape(X, -1, 1), ca.reshape(U, -1, 1))
-        constraints = ca.vertcat(*constraints)
+        g = ca.vertcat(*g)
 
-        nlp = {"f": cost, "x": opt_vars, "g": constraints, "p": P}
+        nlp = {"f": obj, "x": opt_vars, "g": g, "p": P}
+
         opts = {
             "ipopt.print_level": 0,
             "ipopt.max_iter": cfg.ipopt_max_iter,
             "ipopt.tol": 1e-4,
             "print_time": 0,
         }
+
         self.solver = ca.nlpsol("solver", "ipopt", nlp, opts)
+
+        nX = self.nx * (N + 1)
 
         lbx = []
         ubx = []
+
         for _ in range(N + 1):
             lbx += [-ca.inf, p.v_min, p.theta_min, p.omega_min]
             ubx += [ ca.inf, p.v_max, p.theta_max, p.omega_max]
+
         for _ in range(N):
             lbx += [p.tau_min]
             ubx += [p.tau_max]
 
         self.lbx = np.array(lbx, dtype=float)
         self.ubx = np.array(ubx, dtype=float)
+
         self.lbg = np.zeros(self.nx * (N + 1))
         self.ubg = np.zeros(self.nx * (N + 1))
-        self.nX = self.nx * (N + 1)
+
+        self.nX = nX
 
     def _initial_guess(self, state: np.ndarray, tau_prev: float) -> np.ndarray:
         N = self.cfg.N
 
-        if self.last_solution is None:
-            X_guess = np.tile(state.reshape(-1, 1), (1, N + 1))
-            U_guess = np.full((self.nu, N), tau_prev)
-        else:
-            sol = self.last_solution
+        if self.last_solution is not None:
+            sol = self.last_solution.copy()
+
             X_sol = sol[:self.nX].reshape((self.nx, N + 1), order="F")
             U_sol = sol[self.nX:].reshape((self.nu, N), order="F")
 
             X_guess = np.hstack([X_sol[:, 1:], X_sol[:, -1:]])
             U_guess = np.hstack([U_sol[:, 1:], U_sol[:, -1:]])
+
             X_guess[:, 0] = state
+        else:
+            X_guess = np.tile(state.reshape(-1, 1), (1, N + 1))
+            U_guess = np.full((self.nu, N), tau_prev)
 
         return np.concatenate([
             X_guess.reshape(-1, order="F"),
             U_guess.reshape(-1, order="F"),
         ])
 
-    def solve(self, state: np.ndarray, ref: np.ndarray, tau_prev: float) -> tuple[float, bool]:
-        params = np.concatenate([state, ref, np.array([tau_prev])])
+    def solve(
+        self,
+        state: np.ndarray,
+        ref: np.ndarray,
+        tau_prev: float,
+        a_rls: np.ndarray,) -> tuple[float, dict]:
+        
+        params = np.concatenate([
+            state,
+            ref,
+            np.array([tau_prev], dtype=float),
+            np.asarray(a_rls, dtype=float).reshape(-1),
+        ])
+
         x_init = self._initial_guess(state, tau_prev)
 
         try:
             sol = self.solver(
-                x0=x_init, 
-                lbx=self.lbx, 
-                ubx=self.ubx, 
-                lbg=self.lbg, 
-                ubg=self.ubg, 
+                x0=x_init,
+                lbx=self.lbx,
+                ubx=self.ubx,
+                lbg=self.lbg,
+                ubg=self.ubg,
                 p=params,
             )
+
             w = np.array(sol["x"]).flatten()
             self.last_solution = w
+
             U_opt = w[self.nX:].reshape((self.nu, self.cfg.N), order="F")
             tau = float(U_opt[0, 0])
-            return tau, True
-        except RuntimeError:
-            # Small fallback for debugging: keep the previous command.
-            tau = float(np.clip(tau_prev, self.p.tau_min, self.p.tau_max))
-            return tau, False
+            tau = float(np.clip(tau, self.p.tau_min, self.p.tau_max))
 
+            return tau, {"success": True, "cost": float(sol["f"])}
+
+        except RuntimeError as exc:
+            tau = float(np.clip(tau_prev, self.p.tau_min, self.p.tau_max))
+            return tau, {"success": False, "error": str(exc)}
 
 # ============================================================
 # CSV logging
@@ -340,11 +429,11 @@ def main():
     mujoco.mj_forward(model, data)
 
     theta_ref = math.radians(PITCH_REF_DEG)
-    # ref = [x_ref, v_ref, theta_ref, omega_ref]
     ref = np.array([0.0, V_REF, theta_ref, 0.0], dtype=float)
 
     sim_dt = float(model.opt.timestep)
     ctrl_steps = max(1, int(round(CTRL_DT / sim_dt)))
+    ctrl_dt_actual = ctrl_steps * sim_dt
     n_steps = int(round(SIM_TIME / sim_dt))
 
     tau_prev = 0.0
@@ -353,6 +442,42 @@ def main():
     solve_success = False
     control_count = 0
     history = []
+
+    # RLS settings.
+    forgetting_factor = 0.9995
+    initial_covariance = 3.0
+    derivative_alpha = 0.0
+    clip_parameters = False
+
+    # Initial RLS parameters from the nominal physics model.
+    a_nom = np.array(
+        [
+            p.m * p.g * p.l / p.I_eff,
+            -1.0 / p.I_eff,
+            0.0,
+            0.0,
+            0.0,
+        ],
+        dtype=float,
+    )
+    a_rls = a_nom.copy()
+    # a_rls = np.zeros(5)
+    P_rls = initial_covariance * np.eye(5)
+    filtered_omega_dot = None
+    last_rls_info = {
+        "omega_dot_raw": 0.0,
+        "y": 0.0,
+        "y_hat": 0.0,
+        "omega_dot_nominal": 0.0,
+        "residual_target": 0.0,
+        "residual_hat": 0.0,
+        "error": 0.0,
+        "skipped": True,
+    }
+
+    # State at the previous NMPC update. Used so RLS updates once per control period,
+    # not at every 0.001 s MuJoCo integration step.
+    last_control_state = None
 
     def read_controller_state() -> tuple[float, float, float, float, float, float]:
         x = float(data.qpos[root_x_qid])
@@ -363,43 +488,60 @@ def main():
         raw_pitch = float(data.qpos[root_pitch_qid])
         raw_pitch_dot = float(data.qvel[root_pitch_vid])
 
-        # Convert MuJoCo pitch convention into controller convention.
         theta = PITCH_SIGN * raw_pitch
         omega = PITCH_SIGN * raw_pitch_dot
 
         return x, z, v, z_dot, theta, omega
 
+    def read_nmpc_state() -> np.ndarray:
+        x, _, v, _, theta, omega = read_controller_state()
+        return np.array([x, v, theta, omega], dtype=float)
+
     def control_update():
         nonlocal tau_prev, tau_cmd, ctrl_cmd, solve_success, control_count
+        nonlocal a_rls, P_rls, filtered_omega_dot, last_rls_info, last_control_state
 
-        x = float(data.qpos[root_x_qid])
-        v = float(data.qvel[root_x_vid])
+        state_now = read_nmpc_state()
 
-        # Convert MuJoCo pitch convention into controller convention.
-        theta = PITCH_SIGN * float(data.qpos[root_pitch_qid])
-        omega = PITCH_SIGN * float(data.qvel[root_pitch_vid])
+        # Update RLS ONCE per control period using the previous applied tau_cmd.
+        # This avoids fitting high-frequency MuJoCo contact impulses at 1000 Hz.
+        if last_control_state is not None:
+            a_rls, P_rls, filtered_omega_dot, last_rls_info = rls_update(
+                state_prev=last_control_state,
+                tau=tau_cmd,
+                state_next=state_now,
+                dt=ctrl_dt_actual,
+                p=p,
+                a=a_rls,
+                P=P_rls,
+                filtered_omega_dot=filtered_omega_dot,
+                forgetting_factor=forgetting_factor,
+                derivative_alpha=derivative_alpha,
+                clip_parameters=clip_parameters,
+            )
 
-        state = np.array([x, v, theta, omega], dtype=float)
-        tau, success = nmpc.solve(state, ref, tau_prev)
+        tau, success = nmpc.solve(state_now, ref, tau_prev, a_rls)
         tau = float(np.clip(tau, p.tau_min, p.tau_max))
         tau_prev = tau
 
+        # ACTUATOR_SIGN belongs only here, at the MuJoCo command interface.
         ctrl = ACTUATOR_SIGN * TAU_TO_CTRL * tau
         ctrl = float(np.clip(ctrl, ctrl_min, ctrl_max))
         data.ctrl[drive_id] = ctrl
 
-        # Keep the latest command values for CSV logging.
         tau_cmd = tau
         ctrl_cmd = ctrl
         solve_success = bool(success)
+        last_control_state = state_now.copy()
 
         if control_count % PRINT_EVERY_N_CONTROLS == 0:
             print(
                 f"t={data.time:6.3f} | "
-                f"x={x:7.3f} | v={v:7.3f} | "
-                f"pitch={math.degrees(theta):8.2f} deg | "
-                f"omega={omega:8.3f} | tau={tau:8.3f} | "
-                f"ctrl={ctrl:8.3f} | success={success}"
+                f"x={state_now[0]:7.3f} | v={state_now[1]:7.3f} | "
+                f"pitch={math.degrees(state_now[2]):8.2f} deg | "
+                f"omega={state_now[3]:8.3f} | tau={tau:8.3f} | "
+                f"ctrl={ctrl:8.3f} | success={success} | "
+                f"rls_err={last_rls_info['error']:8.3f}"
             )
 
         control_count += 1
@@ -426,7 +568,24 @@ def main():
             "tau_cmd": tau_cmd,
             "ctrl_cmd": ctrl_cmd,
             "solve_success": int(solve_success),
+
+            # RLS logs.
+            "omega_dot_raw": float(last_rls_info["omega_dot_raw"]),
+            "omega_dot_filtered": float(last_rls_info["y"]),
+            "omega_dot_rls": float(last_rls_info["y_hat"]),
+            "rls_error": float(last_rls_info["error"]),
+            "rls_skipped": int(last_rls_info["skipped"]),
+            "a_g": float(a_rls[0]),
+            "a_tau": float(a_rls[1]),
+            "a_omega": float(a_rls[2]),
+            "a_v": float(a_rls[3]),
+            "a_0": float(a_rls[4]),
+            "a_g_nom": float(a_nom[0]),
+            "a_tau_nom": float(a_nom[1]),
         })
+
+    def step_sim():
+        mujoco.mj_step(model, data)
 
     if RENDER:
         k = 0
@@ -437,7 +596,7 @@ def main():
                 if k % ctrl_steps == 0:
                     control_update()
 
-                mujoco.mj_step(model, data)
+                step_sim()
                 log_step()
                 viewer.sync()
 
@@ -450,16 +609,25 @@ def main():
         for k in range(n_steps):
             if k % ctrl_steps == 0:
                 control_update()
-            mujoco.mj_step(model, data)
+            step_sim()
             log_step()
 
     final_pitch = PITCH_SIGN * float(data.qpos[root_pitch_qid])
     final_omega = PITCH_SIGN * float(data.qvel[root_pitch_vid])
+
     print("\nFinal state")
     print(f"x      = {float(data.qpos[root_x_qid]):.3f} m")
     print(f"v      = {float(data.qvel[root_x_vid]):.3f} m/s")
     print(f"pitch  = {math.degrees(final_pitch):.2f} deg")
     print(f"omega  = {final_omega:.3f} rad/s")
+
+    print("\nFinal RLS coefficients")
+    print("omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0")
+    print(f"a_g     learned: {a_rls[0]: .4f} | nominal: {a_nom[0]: .4f}")
+    print(f"a_tau   learned: {a_rls[1]: .4f} | nominal: {a_nom[1]: .4f}")
+    print(f"a_omega learned: {a_rls[2]: .4f} | nominal: {a_nom[2]: .4f}")
+    print(f"a_v     learned: {a_rls[3]: .4f} | nominal: {a_nom[3]: .4f}")
+    print(f"a_0     learned: {a_rls[4]: .4f} | nominal: {a_nom[4]: .4f}")
 
     save_history_csv(history, CSV_PATH)
 
