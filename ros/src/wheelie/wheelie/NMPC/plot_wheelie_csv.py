@@ -15,7 +15,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-CSV_PATH = Path(__file__).with_name("wheelie_mujoco_log.csv")
+CSV_PATH = Path(__file__).with_name("wheelie_mujoco_log_rls.csv")
+# CSV_PATH = Path(__file__).with_name("wheelie_mujoco_log.csv")
 SAVE_FIG = True
 FIG_PATH = Path(__file__).with_name("wheelie_mujoco_plots.png")
 
@@ -42,6 +43,10 @@ def main():
     x = data["x"]
     v = data["x_dot"]
 
+    omega_dot_measured = data["omega_dot_filtered"]
+    omega_dot_rls = data["omega_dot_rls"]*-1
+    rls_error = data["rls_error"]
+
     print("Loaded:", CSV_PATH)
     print(f"Final pitch: {pitch_deg[-1]:.2f} deg")
     print(f"Final x:     {x[-1]:.3f} m")
@@ -49,7 +54,7 @@ def main():
     print(f"Max pitch:   {np.max(pitch_deg):.2f} deg")
     print(f"Min pitch:   {np.min(pitch_deg):.2f} deg")
 
-    fig, axs = plt.subplots(4, 1, sharex=True, figsize=(10, 10))
+    fig, axs = plt.subplots(5, 1, sharex=True, figsize=(10, 10))
 
     # Same main plot as your original NMPC script: pitch and reference.
     axs[0].plot(t, pitch_deg, label="controller pitch")
@@ -72,13 +77,20 @@ def main():
     axs[2].grid(True)
     axs[2].legend()
 
-    # Extra useful debug plot.
-    axs[3].plot(t, pitch_dot, label="pitch_dot")
-    axs[3].plot(t, x, label="x")
-    axs[3].set_xlabel("time [s]")
-    axs[3].set_ylabel("omega / x")
+    axs[3].plot(t, omega_dot_measured, label="measured omega_dot")
+    axs[3].plot(t, omega_dot_rls, linestyle="--", label="RLS omega_dot")
+    axs[3].plot(t, rls_error, linestyle=":", label="RLS error")
+    axs[3].set_ylabel("omega_dot [rad/s^2]")
     axs[3].grid(True)
     axs[3].legend()
+
+    # Extra useful debug plot.
+    axs[4].plot(t, pitch_dot, label="pitch_dot")
+    axs[4].plot(t, x, label="x")
+    axs[4].set_xlabel("time [s]")
+    axs[4].set_ylabel("omega / x")
+    axs[4].grid(True)
+    axs[4].legend()
 
     fig.suptitle("MuJoCo Wheelie NMPC Results")
     fig.tight_layout()

@@ -20,12 +20,14 @@ XML_PATH = Path(__file__).with_name("monster_truck_flip_2d.xml")
 CSV_PATH = Path(__file__).with_name("wheelie_mujoco_log.csv")
 
 RENDER = True                 # True = open MuJoCo viewer, False = headless
-SIM_TIME = 20.0                # seconds
+SIM_TIME = 25.0                # seconds
 CTRL_DT = 0.05                # NMPC update period [s]
 PRINT_EVERY_N_CONTROLS = 5
 
 # Your MuJoCo root_pitch is negative during a backward wheelie.
 # This makes the controller see backward wheelie as positive pitch.
+
+#PITCH_SIGN = -1.0 # for wheelie using rear wheels
 PITCH_SIGN = -1.0
 
 # If the motor acts in the wrong direction, change this to -1.0.
@@ -47,17 +49,17 @@ V_REF = 0.0
 @dataclass
 class WheelieParams:
     m: float = 5.1
-    l: float = 0.18
+    l: float = 0.2 #0.18
     I_body: float = (1.0 / 12.0) * 5.1 * (0.53**2 + 0.30**2)
     r: float = 0.085
     g: float = 9.81
     c_v: float = 9.0
 
-    tau_min: float = -12.0
-    tau_max: float = 12.0
+    tau_min: float = -8.0
+    tau_max: float = 8.0
 
     theta_min: float = math.radians(0.0)
-    theta_max: float = math.radians(100.0)
+    theta_max: float = math.radians(120.0)
     omega_min: float = -8.0
     omega_max: float = 8.0
     v_min: float = -5.0
@@ -81,14 +83,27 @@ class WheelieParams:
 
     # dt: float = CTRL_DT
     # N: int = 10
-    # q_x: float = 3.5
+    # q_x: float = 5.0
     # q_v: float = 55.0
-    # q_theta: float = 1284.0
+    # q_theta: float = 1340.0
     # q_omega: float = 0.1
     # r_tau: float = 0.34867
     # r_dtau: float = 2.5
     # q_terminal_theta: float = 700.0
     # q_terminal_omega: float = 0.1
+    # ipopt_max_iter: int = 50
+
+    # For wheelie using the front wheels
+    # dt: float = CTRL_DT
+    # N: int = 10
+    # q_x: float = 0.0
+    # q_v: float = 0.15
+    # q_theta: float = 1300.0
+    # q_omega: float = 2200.0
+    # r_tau: float = 0.18
+    # r_dtau: float = 1.60
+    # q_terminal_theta: float = 3500.0
+    # q_terminal_omega: float = 14000.0
     # ipopt_max_iter: int = 50
 
 @dataclass
@@ -142,11 +157,15 @@ class WheelieNMPC:
     def _f_ca(self, x, u):
         p = self.p
         # DYNAMICS x = [position, velocity, pitch, pitch_rate]
+        # Back wheels wheelie
         xpos_dot = x[1]
         velocity_dot = u[0] / (p.m * p.r) - p.c_v * x[1]
         theta_dot = x[3]
         omega_dot = (-u[0] + p.m * p.g * p.l * ca.cos(x[2])) / p.I_eff
+
         return ca.vertcat(xpos_dot, velocity_dot, theta_dot, omega_dot)
+    
+
 
     def _rk4_ca(self, x, u):
         dt = self.cfg.dt

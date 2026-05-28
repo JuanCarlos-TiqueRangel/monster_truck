@@ -100,6 +100,24 @@ class ControllerWrapper:
                 lambda state, tau: nmpc_mod.rk4_step_np(state, tau, self.dt, self.p)
             )
 
+        elif self.controller_type == "nmpc-rls":
+            import wheelie_nmpc_rls as nmpc_mod
+
+            self.mod = nmpc_mod
+            self.p = nmpc_mod.WheelieParams()
+            self.mpc_cfg = nmpc_mod.MPCConfig()
+            self.controller = nmpc_mod.WheelieNMPC(self.p, self.mpc_cfg)
+            self.dt = float(self.p.sim_dt)
+            self.theta_ref = math.radians(cfg.theta_ref_deg)
+            self.tau_prev = 0.0
+
+            self.p.pitch_ref = cfg.theta_ref_deg
+            self.p.sim_time = cfg.sim_time
+
+            self.state_step = (
+                lambda state, tau: nmpc_mod.rk4_step_np(state, tau, self.dt, self.p)
+            )
+
         else:
             raise ValueError("controller must be either 'pd' or 'nmpc'")
 
@@ -474,7 +492,7 @@ def animate(data: Optional[SimData], wrapper: ControllerWrapper, cfg: SimConfig)
 
 def parse_args() -> SimConfig:
     parser = argparse.ArgumentParser(description="Real-time wheelie controller visualization.")
-    parser.add_argument("--controller", choices=["pd", "nmpc"], default="pd")
+    parser.add_argument("--controller", choices=["pd", "nmpc", "nmpc-rls"], default="pd")
     parser.add_argument("--theta-ref-deg", type=float, default=90.0)
     parser.add_argument("--theta0-deg", type=float, default=0.0)
     parser.add_argument("--v0", type=float, default=0.0)

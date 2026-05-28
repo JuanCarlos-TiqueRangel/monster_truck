@@ -39,12 +39,12 @@ except ImportError as exc:
 @dataclass
 class WheelieParams:
     m: float = 5.1          # total mass of the vehicle
-    l: float = 0.18         # rear axle to COM DISTANCE
+    l: float = 0.18 #0.18         # rear axle to COM DISTANCE
     I_body: float = (1/12)*(m)*(0.53**2 + 0.30**2)    #Inertia calculation I_body = 1/12 * mass(Lenght^2 + Height^2) 0.04
     r: float = 0.085         #
     g: float = 9.81         #
     c_v: float = 9.0        #
-    tau_min: float = -8.0
+    tau_min: float = 0.0
     tau_max: float = 12.0
     theta_min: float = math.radians(0.0)
     theta_max: float = math.radians(100.0)
@@ -53,8 +53,8 @@ class WheelieParams:
     v_min: float = -4.0
     v_max: float = 4.0
 
-    pitch_ref: float = 90.0
-    sim_time: float = 5.0
+    pitch_ref: float = 80.0
+    sim_time: float = 15.0
     sim_dt: float = 0.1
 
     @property
@@ -80,11 +80,15 @@ class MPCConfig:
 def continuous_dynamics_np(state: np.ndarray, tau: float, p: WheelieParams) -> np.ndarray:
     x, v, theta, omega = state
 
+    # wheelie using front wheels
+    noise = np.random.normal(loc=0.0, scale=4.0)
     x_dot = v
     v_dot = tau / (p.m * p.r) - p.c_v * v
     pitch_dot = omega
-    omega_dot = (-tau + p.m * p.g * p.l * math.cos(theta)) / p.I_eff
+    omega_dot = (-tau + p.m * p.g * p.l * math.cos(theta)) / p.I_eff + noise
     dynamics = np.array([x_dot, v_dot, pitch_dot, omega_dot], dtype=float)
+    
+    
 
     return dynamics
 
@@ -115,12 +119,20 @@ class WheelieNMPC:
 
     def _f_ca(self, x, u):
         p = self.p
-        return ca.vertcat(
-            x[1],
-            u[0] / (p.m * p.r) - p.c_v * x[1],
-            x[3],
-            (-u[0] + p.m * p.g * p.l * ca.cos(x[2])) / p.I_eff,
-        )
+        # wheelie dynamics
+        xpos_dot = x[1]
+        velocity_dot = u[0] / (p.m * p.r) - p.c_v * x[1]
+        theta_dot = x[3]
+        omega_dot = (-u[0] + p.m * p.g * p.l * ca.cos(x[2])) / p.I_eff
+        
+        return ca.vertcat(xpos_dot, velocity_dot, theta_dot, omega_dot)
+
+        # return ca.vertcat(
+        #     x[1],
+        #     u[0] / (p.m * p.r) - p.c_v * x[1],
+        #     x[3],
+        #     (-u[0] + p.m * p.g * p.l * ca.cos(x[2])) / p.I_eff,
+        # )
 
     def _rk4_ca(self, x, u):
         dt = self.cfg.dt
