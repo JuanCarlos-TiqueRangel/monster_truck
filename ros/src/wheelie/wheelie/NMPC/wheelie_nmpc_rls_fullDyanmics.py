@@ -31,7 +31,7 @@ class WheelieParams:
     v_min: float = -5.0
     v_max: float = 5.0
 
-    pitch_ref: float = 90.0
+    pitch_ref: float = 80.0
     sim_time: float = 5.0
     sim_dt: float = 0.1
 
@@ -43,17 +43,17 @@ class WheelieParams:
 @dataclass
 class MPCConfig:
     dt: float = 0.1
-    N: int = 35
+    N: int = 30
 
     q_x: float = 0.0
     q_v: float = 0.01
-    q_theta: float = 1300.0
-    q_omega: float = 15.0
+    q_theta: float = 300.0
+    q_omega: float = 5.0
 
     r_tau: float = 0.1
     r_dtau: float = 0.01
 
-    q_terminal_theta: float = 400.0
+    q_terminal_theta: float = 100.0
     q_terminal_omega: float = 100.0
 
     ipopt_max_iter: int = 50
@@ -83,6 +83,7 @@ def continuous_dynamics_np(
     if plant_has_mismatch:
         # Artificial unknown dynamics for testing RLS only.
         unknown = 0.5 * omega + 5.0 * v + 3.0 * np.sin(theta)
+        v_dot += 0.50 * np.sin(theta) + 0.25 * tau * np.cos(theta)
         omega_dot = omega_dot + unknown
 
     return np.array([x_dot, v_dot, theta_dot, omega_dot], dtype=float)
@@ -392,27 +393,27 @@ def simulate_closed_loop() -> None:
     clip_parameters = False
 
     # Initial RLS parameters from nominal physics.
-    # a_nom = np.array(
-    #     [
-    #         p.m * p.g * p.l / p.I_eff,
-    #         -1.0 / p.I_eff,
-    #         0.0,
-    #         0.0,
-    #         0.0,
-    #     ],
-    #     dtype=float,
-    # )
-
     a_nom = np.array(
         [
-            26.064722933639302, #27.469535454455873,
-            -2.4311076315342164, #-2.1796795803615066,
-            -0.31780606164193764,#-0.878888846430661,
-            2.9362171252791613,#2.8155095534555734,
-            3.3556218290499054,#2.959258504654965,
+            p.m * p.g * p.l / p.I_eff,
+            -1.0 / p.I_eff,
+            0.0,
+            0.0,
+            0.0,
         ],
         dtype=float,
     )
+
+    # a_nom = np.array(
+    #     [
+    #         26.064722933639302, #27.469535454455873,
+    #         -2.4311076315342164, #-2.1796795803615066,
+    #         -0.31780606164193764,#-0.878888846430661,
+    #         2.9362171252791613,#2.8155095534555734,
+    #         3.3556218290499054,#2.959258504654965,
+    #     ],
+    #     dtype=float,
+    # )
 
     #a_rls = a_nom.copy()
     a_rls = np.zeros(5)
@@ -512,6 +513,8 @@ def plot_results(history: np.ndarray, a_nom: np.ndarray) -> None:
     theta_ref_deg = np.rad2deg(history[:, 6])
     omega = history[:, 4]
     tau = history[:, 5]
+    
+    v_dot_measured = history[:, 2]
 
     omega_dot_measured = history[:, 7]
     omega_dot_rls = history[:, 8]
@@ -523,7 +526,7 @@ def plot_results(history: np.ndarray, a_nom: np.ndarray) -> None:
     a_v = history[:, 13]
     a_0 = history[:, 14]
 
-    fig, axs = plt.subplots(5, 1, sharex=True, figsize=(11, 10))
+    fig, axs = plt.subplots(6, 1, sharex=True, figsize=(11, 10))
 
     axs[0].plot(t, theta_deg, label="theta")
     axs[0].plot(t, theta_ref_deg, linestyle="--", label="theta_ref")
@@ -539,31 +542,36 @@ def plot_results(history: np.ndarray, a_nom: np.ndarray) -> None:
     axs[2].set_ylabel("tau [Nm]")
     axs[2].grid(True)
 
-    axs[3].plot(t, omega_dot_measured, label="measured omega_dot")
-    axs[3].plot(t, omega_dot_rls, linestyle="--", label="RLS omega_dot")
-    axs[3].plot(t, rls_error, linestyle=":", label="RLS error")
-    axs[3].set_ylabel("omega_dot [rad/s^2]")
+    axs[3].plot(t, v_dot_measured, label="measured v_dot")
+    axs[3].set_ylabel("v_dot [m/s^2]")
     axs[3].grid(True)
     axs[3].legend()
 
-    axs[4].plot(t, a_g, label="a_g")
-    axs[4].plot(t, a_tau, label="a_tau")
-    axs[4].plot(t, a_omega, label="a_omega")
-    axs[4].plot(t, a_v, label="a_v")
-    axs[4].plot(t, a_0, label="a_0")
-    axs[4].axhline(a_nom[0], linestyle="--", linewidth=1, label="a_g nominal")
-    axs[4].axhline(a_nom[1], linestyle="--", linewidth=1, label="a_tau nominal")
-    axs[4].set_ylabel("RLS coeffs")
-    axs[4].set_xlabel("time [s]")
+    axs[4].plot(t, omega_dot_measured, label="measured omega_dot")
+    axs[4].plot(t, omega_dot_rls, linestyle="--", label="RLS omega_dot")
+    axs[4].plot(t, rls_error, linestyle=":", label="RLS error")
+    axs[4].set_ylabel("omega_dot [rad/s^2]")
     axs[4].grid(True)
-    axs[4].legend(ncol=3)
+    axs[4].legend()
+
+    axs[5].plot(t, a_g, label="a_g")
+    axs[5].plot(t, a_tau, label="a_tau")
+    axs[5].plot(t, a_omega, label="a_omega")
+    axs[5].plot(t, a_v, label="a_v")
+    axs[5].plot(t, a_0, label="a_0")
+    axs[5].axhline(a_nom[0], linestyle="--", linewidth=1, label="a_g nominal")
+    axs[5].axhline(a_nom[1], linestyle="--", linewidth=1, label="a_tau nominal")
+    axs[5].set_ylabel("RLS coeffs")
+    axs[5].set_xlabel("time [s]")
+    axs[5].grid(True)
+    axs[5].legend(ncol=3)
 
     fig.suptitle("Wheelie NMPC + RLS in One Function")
     fig.tight_layout()
     plt.show()
 
-    # fig.savefig("images/wheelie_fullDynamics.png", dpi=200)
-    # print("Saved figure:", "images/wheelie_fullDynamics.png")
+    fig.savefig("images/wheelie_fullDynamics.png", dpi=200)
+    print("Saved figure:", "images/wheelie_fullDynamics.png")
 
 
 if __name__ == "__main__":

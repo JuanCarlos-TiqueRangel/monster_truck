@@ -1,0 +1,2 @@
+Invoking command in '/ros_ws/build/leo_example_follow_aruco_marker': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake /ros_ws/src/leo_example_follow_aruco_marker -DCMAKE_INSTALL_PREFIX=/ros_ws/install/leo_example_follow_aruco_marker
+Invoked command in '/ros_ws/build/leo_example_follow_aruco_marker' returned '1': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake /ros_ws/src/leo_example_follow_aruco_marker -DCMAKE_INSTALL_PREFIX=/ros_ws/install/leo_example_follow_aruco_marker
