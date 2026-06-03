@@ -1,0 +1,36 @@
+[0.007s] Invoking command in '/ros_ws/build/leo_example_follow_aruco_marker': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake /ros_ws/src/leo_example_follow_aruco_marker -DCMAKE_INSTALL_PREFIX=/ros_ws/install/leo_example_follow_aruco_marker
+[0.125s] -- The C compiler identification is GNU 13.3.0
+[0.202s] -- The CXX compiler identification is GNU 13.3.0
+[0.213s] -- Detecting C compiler ABI info
+[0.274s] -- Detecting C compiler ABI info - done
+[0.279s] -- Check for working C compiler: /usr/bin/cc - skipped
+[0.281s] -- Detecting C compile features
+[0.282s] -- Detecting C compile features - done
+[0.288s] -- Detecting CXX compiler ABI info
+[0.344s] -- Detecting CXX compiler ABI info - done
+[0.348s] -- Check for working CXX compiler: /usr/bin/c++ - skipped
+[0.348s] -- Detecting CXX compile features
+[0.348s] -- Detecting CXX compile features - done
+[0.356s] -- Found ament_cmake: 2.5.4 (/opt/ros/jazzy/share/ament_cmake/cmake)
+[0.442s] -- Found Python3: /usr/bin/python3 (found version "3.12.3") found components: Interpreter 
+[0.526s] -- Configuring incomplete, errors occurred!
+[0.526s] [31mCMake Error at CMakeLists.txt:11 (find_package):
+[0.526s]   By not providing "Findgenerate_parameter_library.cmake" in
+[0.526s]   CMAKE_MODULE_PATH this project has asked CMake to find a package
+[0.526s]   configuration file provided by "generate_parameter_library", but CMake did
+[0.526s]   not find one.
+[0.526s] 
+[0.526s]   Could not find a package configuration file provided by
+[0.526s]   "generate_parameter_library" with any of the following names:
+[0.526s] 
+[0.526s]     generate_parameter_libraryConfig.cmake
+[0.526s]     generate_parameter_library-config.cmake
+[0.526s] 
+[0.526s]   Add the installation prefix of "generate_parameter_library" to
+[0.526s]   CMAKE_PREFIX_PATH or set "generate_parameter_library_DIR" to a directory
+[0.526s]   containing one of the above files.  If "generate_parameter_library"
+[0.526s]   provides a separate development package or SDK, be sure it has been
+[0.526s]   installed.
+[0.526s] 
+[0.526s] [0m
+[0.530s] Invoked command in '/ros_ws/build/leo_example_follow_aruco_marker' returned '1': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake /ros_ws/src/leo_example_follow_aruco_marker -DCMAKE_INSTALL_PREFIX=/ros_ws/install/leo_example_follow_aruco_marker

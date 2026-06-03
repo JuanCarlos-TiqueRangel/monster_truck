@@ -48,7 +48,7 @@ class MPCConfig:
     q_x: float = 0.0
     q_v: float = 0.01
     q_theta: float = 300.0
-    q_omega: float = 5.0
+    q_omega: float = 15.0
 
     r_tau: float = 0.1
     r_dtau: float = 0.01
@@ -60,36 +60,38 @@ class MPCConfig:
 
 
 # ============================================================
-# Nominal dynamics
+# Plant dynamics for plain Python simulation
 # ============================================================
+
 def continuous_dynamics_np(
     state: np.ndarray,
     tau: float,
     p: WheelieParams,
     plant_has_mismatch: bool = False,
 ) -> np.ndarray:
-    """
-    Simulated plant.
-
-    For real MuJoCo/hardware, replace this with the measured next state.
-    """
     x, v, theta, omega = state
 
     x_dot = v
     v_dot = tau / (p.m * p.r) - p.c_v * v
     theta_dot = omega
-    omega_dot =  (-tau + p.m * p.g * p.l * np.cos(theta)) / p.I_eff 
+    omega_dot = (-tau + p.m * p.g * p.l * np.cos(theta)) / p.I_eff
 
     if plant_has_mismatch:
-        # Artificial unknown dynamics for testing RLS only.
-        unknown = 0.5 * omega + 5.0 * v + 3.0 * np.sin(theta)
+        # Artificial unknown dynamics for testing RLS.
+        # For real MuJoCo/hardware, this is replaced by measured next state.
         v_dot += 0.50 * np.sin(theta) + 0.25 * tau * np.cos(theta)
-        omega_dot = omega_dot + unknown
+        omega_dot += 0.5 * omega + 5.0 * v + 3.0 * np.sin(theta)
 
     return np.array([x_dot, v_dot, theta_dot, omega_dot], dtype=float)
 
 
-def rk4_step_np(state: np.ndarray, tau: float, dt: float, p: WheelieParams, plant_has_mismatch: bool = False,) -> np.ndarray:
+def rk4_step_np(
+    state: np.ndarray,
+    tau: float,
+    dt: float,
+    p: WheelieParams,
+    plant_has_mismatch: bool = False,
+) -> np.ndarray:
     k1 = continuous_dynamics_np(state, tau, p, plant_has_mismatch)
     k2 = continuous_dynamics_np(state + 0.5 * dt * k1, tau, p, plant_has_mismatch)
     k3 = continuous_dynamics_np(state + 0.5 * dt * k2, tau, p, plant_has_mismatch)
@@ -98,82 +100,171 @@ def rk4_step_np(state: np.ndarray, tau: float, dt: float, p: WheelieParams, plan
 
 
 # ============================================================
-# RLS in one function
+# Full-dynamics two-output RLS
 # ============================================================
+
+# Model:
+#   v_dot     = phi_v^T a_v
+#   omega_dot = phi_w^T a_w
+#
+# Feature vectors:
+#   phi_v = [tau, v, |v|v, tau*cos(theta), 1]
+#   phi_w = [cos(theta), tau, omega, v, 1]
+#
+# Stacked parameter vector:
+#   a = [a_v(5), a_w(5)]
+#
+# Block regression:
+#   y = [v_dot, omega_dot]
+#   y = H a
+
+
+def nominal_rls_parameters(p: WheelieParams) -> np.ndarray:
+    return np.array(
+        [
+            # v_dot = b_tau*tau + b_v*v + b_quad*|v|v + b_tau_theta*tau*cos(theta) + b_0
+            1.0 / (p.m * p.r),
+            -p.c_v,
+            0.0,
+            0.0,
+            0.0,
+
+            # omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0
+            p.m * p.g * p.l / p.I_eff,
+            -1.0 / p.I_eff,
+            0.0,
+            0.0,
+            0.0,
+        ],
+        dtype=float,
+    )
+
 
 def rls_update(
     state_prev: np.ndarray,
     tau: float,
     state_next: np.ndarray,
     dt: float,
-    p: WheelieParams,
     a: np.ndarray,
     P: np.ndarray,
-    filtered_omega_dot: float | None,
+    filtered_y_dot: np.ndarray | None,
     forgetting_factor: float = 0.999,
     derivative_alpha: float = 0.85,
+    sigma_v_dot: float = 2.0,
+    sigma_omega_dot: float = 5.0,
     clip_parameters: bool = True,
-) -> tuple[np.ndarray, np.ndarray, float, dict]:
-
+    p: WheelieParams | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
     _, v_prev, theta_prev, omega_prev = state_prev
-    omega_next = float(state_next[3])
+    _, v_next, _, omega_next = state_next
 
-    # 1) Measured angular acceleration
-    omega_dot_raw = (omega_next - float(omega_prev)) / dt
+    # 1) Measured derivatives.
+    v_dot_raw = (float(v_next) - float(v_prev)) / dt
+    omega_dot_raw = (float(omega_next) - float(omega_prev)) / dt
+    y_raw = np.array([v_dot_raw, omega_dot_raw], dtype=float)
 
-    # 2) Filter measured angular acceleration FIRST
-    filtered_omega_dot = omega_dot_raw
+    # 2) Filter derivatives.
+    if filtered_y_dot is None:
+        filtered_y_dot = y_raw.copy()
+    else:
+        filtered_y_dot = (
+            derivative_alpha * filtered_y_dot
+            + (1.0 - derivative_alpha) * y_raw
+        )
 
-    omega_dot_measured = float(filtered_omega_dot)
+    y = filtered_y_dot.copy()
 
-    #3) Full dynamics target
-    full_target = omega_dot_measured
-
-    # 4) Feature vector: phi = [cos(theta), tau, omega, v, 1]
-    phi = np.array(
-        [np.cos(theta_prev), tau, omega_prev, v_prev, 1.0],
+    # 3) Different feature vectors.
+    phi_v = np.array(
+        [
+            tau,
+            v_prev,
+            abs(v_prev) * v_prev,
+            tau * np.cos(theta_prev),
+            1.0,
+        ],
         dtype=float,
     )
 
-    # 5) RLS prediction of full omega dynamics
-    omega_dot_hat_before = float(phi @ a)
-    error_before = full_target - omega_dot_hat_before
+    phi_w = np.array(
+        [
+            np.cos(theta_prev),
+            tau,
+            omega_prev,
+            v_prev,
+            1.0,
+        ],
+        dtype=float,
+    )
 
-    # 6) RLS gain
-    P_phi = P @ phi
-    denom = forgetting_factor + float(phi @ P_phi)
+    # 4) Block regression matrix H.
+    H = np.zeros((2, 10), dtype=float)
+    H[0, 0:5] = phi_v
+    H[1, 5:10] = phi_w
 
-    if abs(denom) < 1e-12:
+    # 5) Prediction and error.
+    y_hat_before = H @ a
+    error = y - y_hat_before
+
+    # 6) Weighted/Joseph-form RLS.
+    R = np.diag([sigma_v_dot**2, sigma_omega_dot**2])
+    P_pred = P / forgetting_factor
+    S = H @ P_pred @ H.T + R
+
+    if np.linalg.cond(S) > 1e12:
         info = {
+            "v_dot_raw": float(v_dot_raw),
             "omega_dot_raw": float(omega_dot_raw),
-            "y": float(omega_dot_measured),
-            "y_hat": float(omega_dot_hat_before),
-            "error": float(omega_dot_measured - omega_dot_hat_before),
+            "v_dot_measured": float(y[0]),
+            "omega_dot_measured": float(y[1]),
+            "v_dot_hat": float(y_hat_before[0]),
+            "omega_dot_hat": float(y_hat_before[1]),
+            "v_dot_error": float(y[0] - y_hat_before[0]),
+            "omega_dot_error": float(y[1] - y_hat_before[1]),
             "skipped": True,
         }
-        return a, P, float(filtered_omega_dot), info
+        return a, P, filtered_y_dot, info
 
-    K = P_phi / denom
+    K = P_pred @ H.T @ np.linalg.inv(S)
+    a = a + K @ error
 
-    # 7) Update full-dynamics parameters
-    a = a + K * error_before
-
-    # 9) Covariance update
-    I = np.eye(5)
-    P = ((I - np.outer(K, phi)) @ P) / forgetting_factor
+    I = np.eye(10)
+    P = (I - K @ H) @ P_pred @ (I - K @ H).T + K @ R @ K.T
     P = 0.5 * (P + P.T)
 
-    omega_dot_hat_after = float(phi @ a)
+    # 7) Optional projection/clipping.
+    if clip_parameters and p is not None:
+        a_nom = nominal_rls_parameters(p)
+
+        # v_dot coefficients.
+        a[0] = np.clip(a[0], 0.25 * a_nom[0], 2.50 * a_nom[0])
+        a[1] = np.clip(a[1], 2.50 * a_nom[1], 0.25 * a_nom[1])
+        a[2] = np.clip(a[2], -20.0, 20.0)
+        a[3] = np.clip(a[3], -20.0, 20.0)
+        a[4] = np.clip(a[4], -20.0, 20.0)
+
+        # omega_dot coefficients.
+        a[5] = np.clip(a[5], 0.25 * a_nom[5], 2.50 * a_nom[5])
+        a[6] = np.clip(a[6], 3.00 * a_nom[6], 0.10 * a_nom[6])
+        a[7] = np.clip(a[7], -30.0, 30.0)
+        a[8] = np.clip(a[8], -30.0, 30.0)
+        a[9] = np.clip(a[9], -80.0, 80.0)
+
+    y_hat_after = H @ a
 
     info = {
+        "v_dot_raw": float(v_dot_raw),
         "omega_dot_raw": float(omega_dot_raw),
-        "y": float(omega_dot_measured),
-        "y_hat": float(omega_dot_hat_after),
-        "error": float(omega_dot_measured - omega_dot_hat_after),
+        "v_dot_measured": float(y[0]),
+        "omega_dot_measured": float(y[1]),
+        "v_dot_hat": float(y_hat_after[0]),
+        "omega_dot_hat": float(y_hat_after[1]),
+        "v_dot_error": float(y[0] - y_hat_after[0]),
+        "omega_dot_error": float(y[1] - y_hat_after[1]),
         "skipped": False,
     }
 
-    return a, P, float(filtered_omega_dot), info
+    return a, P, filtered_y_dot, info
 
 
 # ============================================================
@@ -186,22 +277,30 @@ class WheelieNMPC:
         self.cfg = cfg
         self.nx = 4
         self.nu = 1
-        self.n_rls = 5
+        self.n_rls = 10
         self.last_solution = None
         self._build_solver()
 
     def _f_ca(self, x, u, a_rls):
-        p = self.p
         # State x = [position, velocity, pitch, pitch_rate]
         x_dot = x[1]
-        v_dot = u[0] / (p.m * p.r) - p.c_v * x[1]
-        theta_dot = x[3]
-        omega_dot = (
-            a_rls[0] * ca.cos(x[2])
-            + a_rls[1] * u[0]
-            + a_rls[2] * x[3]
-            + a_rls[3] * x[1]
+
+        v_dot = (
+            a_rls[0] * u[0]
+            + a_rls[1] * x[1]
+            + a_rls[2] * ca.fabs(x[1]) * x[1]
+            + a_rls[3] * u[0] * ca.cos(x[2])
             + a_rls[4]
+        )
+
+        theta_dot = x[3]
+
+        omega_dot = (
+            a_rls[5] * ca.cos(x[2])
+            + a_rls[6] * u[0]
+            + a_rls[7] * x[3]
+            + a_rls[8] * x[1]
+            + a_rls[9]
         )
 
         return ca.vertcat(x_dot, v_dot, theta_dot, omega_dot)
@@ -226,17 +325,16 @@ class WheelieNMPC:
         # state [x, v, theta, omega]
         # ref   [x_ref, v_ref, theta_ref, omega_ref]
         # tau_prev
-        # RLS coefficients [a_g, a_tau, a_omega, a_v, a_0]
+        # RLS coefficients [v_dot coeffs 5, omega_dot coeffs 5]
         P = ca.SX.sym("P", 9 + self.n_rls)
 
         x0 = P[0:4]
         ref = P[4:8]
         tau_prev = P[8]
-        a_rls = P[9:14]
+        a_rls = P[9:19]
 
         obj = 0
         g = []
-
         g.append(X[:, 0] - x0)
 
         Q = ca.diag(ca.vertcat(cfg.q_x, cfg.q_v, cfg.q_theta, cfg.q_omega))
@@ -259,7 +357,6 @@ class WheelieNMPC:
 
             x_next = self._rk4_ca(xk, uk, a_rls)
             g.append(X[:, k + 1] - x_next)
-
 
         eN = X[:, N] - ref
         obj += ca.mtimes([eN.T, Qf, eN])
@@ -285,7 +382,7 @@ class WheelieNMPC:
 
         for _ in range(N + 1):
             lbx += [-ca.inf, p.v_min, p.theta_min, p.omega_min]
-            ubx += [ ca.inf, p.v_max, p.theta_max, p.omega_max]
+            ubx += [ca.inf, p.v_max, p.theta_max, p.omega_max]
 
         for _ in range(N):
             lbx += [p.tau_min]
@@ -326,8 +423,8 @@ class WheelieNMPC:
         state: np.ndarray,
         ref: np.ndarray,
         tau_prev: float,
-        a_rls: np.ndarray,) -> tuple[float, dict]:
-        
+        a_rls: np.ndarray,
+    ) -> tuple[float, dict]:
         params = np.concatenate([
             state,
             ref,
@@ -368,7 +465,6 @@ class WheelieNMPC:
 def simulate_closed_loop() -> None:
     p = WheelieParams()
     mpc_cfg = MPCConfig()
-
     controller = WheelieNMPC(p, mpc_cfg)
 
     theta_ref = math.radians(p.pitch_ref)
@@ -382,53 +478,27 @@ def simulate_closed_loop() -> None:
     steps = int(p.sim_time / sim_dt)
     mpc_period_steps = max(1, int(mpc_cfg.dt / sim_dt))
 
-    # RLS settings.
     forgetting_factor = 0.999
     initial_covariance = 3.0
-
-    # For clean simulation, 0.0 is okay.
-    # For MuJoCo or real hardware, try 0.7 to 0.9.
     derivative_alpha = 0.0
-
     clip_parameters = False
 
-    # Initial RLS parameters from nominal physics.
-    a_nom = np.array(
-        [
-            p.m * p.g * p.l / p.I_eff,
-            -1.0 / p.I_eff,
-            0.0,
-            0.0,
-            0.0,
-        ],
-        dtype=float,
-    )
+    sigma_v_dot = 2.0
+    sigma_omega_dot = 5.0
 
-    # a_nom = np.array(
-    #     [
-    #         26.064722933639302, #27.469535454455873,
-    #         -2.4311076315342164, #-2.1796795803615066,
-    #         -0.31780606164193764,#-0.878888846430661,
-    #         2.9362171252791613,#2.8155095534555734,
-    #         3.3556218290499054,#2.959258504654965,
-    #     ],
-    #     dtype=float,
-    # )
+    a_nom = nominal_rls_parameters(p)
+    a_rls = a_nom.copy()
+    P_rls = initial_covariance * np.eye(10)
+    filtered_y_dot = None
 
-    #a_rls = a_nom.copy()
-    a_rls = np.zeros(5)
-    P_rls = initial_covariance * np.eye(5)
-    filtered_omega_dot = None
-
-    # Set True only if you want to test whether RLS learns artificial mismatch.
-    # For nominal simulation, keep False.
     plant_has_mismatch = True
 
     # Columns:
     # t, x, v, theta, omega, tau, theta_ref,
-    # omega_dot_measured, omega_dot_rls, rls_error,
-    # a_g, a_tau, a_omega, a_v, a_0
-    history = np.zeros((steps, 15))
+    # v_dot_meas, v_dot_hat, v_dot_err,
+    # omega_dot_meas, omega_dot_hat, omega_dot_err,
+    # ten RLS coefficients
+    history = np.zeros((steps, 23))
 
     for k in range(steps):
         t = k * sim_dt
@@ -441,50 +511,59 @@ def simulate_closed_loop() -> None:
             if not info["success"]:
                 print(f"[WARN] NMPC failed at t={t:.2f}, using fallback torque")
 
-        # Simulate one step.
-        # In MuJoCo/real hardware, replace this with your measured next state.
-        state_next = rk4_step_np(state_prev, tau_cmd, sim_dt, p, plant_has_mismatch=plant_has_mismatch)
+        state_next = rk4_step_np(
+            state_prev,
+            tau_cmd,
+            sim_dt,
+            p,
+            plant_has_mismatch=plant_has_mismatch,
+        )
 
-        # RLS update OUTSIDE the NMPC solver.
-        a_rls, P_rls, filtered_omega_dot, rls_info = rls_update(
+        a_rls, P_rls, filtered_y_dot, rls_info = rls_update(
             state_prev=state_prev,
             tau=tau_cmd,
             state_next=state_next,
             dt=sim_dt,
-            p=p,
             a=a_rls,
             P=P_rls,
-            filtered_omega_dot=filtered_omega_dot,
+            filtered_y_dot=filtered_y_dot,
             forgetting_factor=forgetting_factor,
             derivative_alpha=derivative_alpha,
+            sigma_v_dot=sigma_v_dot,
+            sigma_omega_dot=sigma_omega_dot,
             clip_parameters=clip_parameters,
+            p=p,
         )
 
-        history[k, :] = [
-            t,
-            state_prev[0],
-            state_prev[1],
-            state_prev[2],
-            state_prev[3],
-            tau_cmd,
-            ref[2],
-            rls_info["y"],
-            rls_info["y_hat"],
-            rls_info["error"],
-            a_rls[0],
-            a_rls[1],
-            a_rls[2],
-            a_rls[3],
-            a_rls[4],
-        ]
+        history[k, :] = np.concatenate([
+            np.array(
+                [
+                    t,
+                    state_prev[0],
+                    state_prev[1],
+                    state_prev[2],
+                    state_prev[3],
+                    tau_cmd,
+                    ref[2],
+                    rls_info["v_dot_measured"],
+                    rls_info["v_dot_hat"],
+                    rls_info["v_dot_error"],
+                    rls_info["omega_dot_measured"],
+                    rls_info["omega_dot_hat"],
+                    rls_info["omega_dot_error"],
+                ],
+                dtype=float,
+            ),
+            a_rls,
+        ])
 
         state = state_next
 
-    print_results(history, p, a_rls, a_nom, rls_info["error"])
+    print_results(history, a_rls, a_nom)
     plot_results(history, a_nom)
 
 
-def print_results(history: np.ndarray, p: WheelieParams, a_rls: np.ndarray, a_nom: np.ndarray, rls_error) -> None:
+def print_results(history: np.ndarray, a_rls: np.ndarray, a_nom: np.ndarray) -> None:
     theta_deg = np.rad2deg(history[:, 3])
     omega = history[:, 4]
     x = history[:, 1]
@@ -495,15 +574,19 @@ def print_results(history: np.ndarray, p: WheelieParams, a_rls: np.ndarray, a_no
     print(f"Final omega: {omega[-1]:.3f} rad/s")
     print(f"Final x:     {x[-1]:.2f} m")
     print(f"Final v:     {v[-1]:.2f} m/s")
-    print(f"Final rls_error:     {rls_error: }")
+    print(f"Final v_dot error:     {history[-1, 9]: .6f}")
+    print(f"Final omega_dot error: {history[-1, 12]: .6f}")
+
+    names = [
+        "b_tau", "b_v", "b_abs_v", "b_tau_cos", "b_0",
+        "a_g", "a_tau", "a_omega", "a_v", "a_0",
+    ]
 
     print("\n========== RLS coefficients ==========")
-    print("Model: omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0")
-    print(f"a_g     learned: {a_rls[0]: } | nominal: {a_nom[0]: .4f}")
-    print(f"a_tau   learned: {a_rls[1]: } | nominal: {a_nom[1]: .4f}")
-    print(f"a_omega learned: {a_rls[2]: } | nominal: {a_nom[2]: .4f}")
-    print(f"a_v     learned: {a_rls[3]: } | nominal: {a_nom[3]: .4f}")
-    print(f"a_0     learned: {a_rls[4]: } | nominal: {a_nom[4]: .4f}")
+    print("v_dot     = b_tau*tau + b_v*v + b_abs_v*|v|v + b_tau_cos*tau*cos(theta) + b_0")
+    print("omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0")
+    for i, name in enumerate(names):
+        print(f"{name:10s} learned: {a_rls[i]: .6f} | nominal: {a_nom[i]: .6f}")
     print("==================================\n")
 
 
@@ -513,20 +596,18 @@ def plot_results(history: np.ndarray, a_nom: np.ndarray) -> None:
     theta_ref_deg = np.rad2deg(history[:, 6])
     omega = history[:, 4]
     tau = history[:, 5]
-    
-    v_dot_measured = history[:, 2]
 
-    omega_dot_measured = history[:, 7]
-    omega_dot_rls = history[:, 8]
-    rls_error = history[:, 9]
+    v_dot_measured = history[:, 7]
+    v_dot_hat = history[:, 8]
+    v_dot_error = history[:, 9]
 
-    a_g = history[:, 10]
-    a_tau = history[:, 11]
-    a_omega = history[:, 12]
-    a_v = history[:, 13]
-    a_0 = history[:, 14]
+    omega_dot_measured = history[:, 10]
+    omega_dot_hat = history[:, 11]
+    omega_dot_error = history[:, 12]
 
-    fig, axs = plt.subplots(6, 1, sharex=True, figsize=(11, 10))
+    coeffs = history[:, 13:23]
+
+    fig, axs = plt.subplots(6, 1, sharex=True, figsize=(12, 12))
 
     axs[0].plot(t, theta_deg, label="theta")
     axs[0].plot(t, theta_ref_deg, linestyle="--", label="theta_ref")
@@ -543,36 +624,37 @@ def plot_results(history: np.ndarray, a_nom: np.ndarray) -> None:
     axs[2].grid(True)
 
     axs[3].plot(t, v_dot_measured, label="measured v_dot")
+    axs[3].plot(t, v_dot_hat, linestyle="--", label="RLS v_dot")
+    axs[3].plot(t, v_dot_error, linestyle=":", label="v_dot error")
     axs[3].set_ylabel("v_dot [m/s^2]")
     axs[3].grid(True)
     axs[3].legend()
 
     axs[4].plot(t, omega_dot_measured, label="measured omega_dot")
-    axs[4].plot(t, omega_dot_rls, linestyle="--", label="RLS omega_dot")
-    axs[4].plot(t, rls_error, linestyle=":", label="RLS error")
+    axs[4].plot(t, omega_dot_hat, linestyle="--", label="RLS omega_dot")
+    axs[4].plot(t, omega_dot_error, linestyle=":", label="omega_dot error")
     axs[4].set_ylabel("omega_dot [rad/s^2]")
     axs[4].grid(True)
     axs[4].legend()
 
-    axs[5].plot(t, a_g, label="a_g")
-    axs[5].plot(t, a_tau, label="a_tau")
-    axs[5].plot(t, a_omega, label="a_omega")
-    axs[5].plot(t, a_v, label="a_v")
-    axs[5].plot(t, a_0, label="a_0")
-    axs[5].axhline(a_nom[0], linestyle="--", linewidth=1, label="a_g nominal")
-    axs[5].axhline(a_nom[1], linestyle="--", linewidth=1, label="a_tau nominal")
+    labels = [
+        "b_tau", "b_v", "b_abs_v", "b_tau_cos", "b_0",
+        "a_g", "a_tau", "a_omega", "a_v", "a_0",
+    ]
+    for i, label in enumerate(labels):
+        axs[5].plot(t, coeffs[:, i], label=label)
+        axs[5].axhline(a_nom[i], linestyle="--", linewidth=0.8)
     axs[5].set_ylabel("RLS coeffs")
     axs[5].set_xlabel("time [s]")
     axs[5].grid(True)
-    axs[5].legend(ncol=3)
+    axs[5].legend(ncol=5, fontsize=8)
 
-    fig.suptitle("Wheelie NMPC + RLS in One Function")
+    fig.suptitle("Wheelie NMPC + Two-Output Full-Dynamics RLS")
     fig.tight_layout()
     plt.show()
 
-    fig.savefig("images/wheelie_fullDynamics.png", dpi=200)
-    print("Saved figure:", "images/wheelie_fullDynamics.png")
-
+    fig.savefig("images/wheelie_fullDynamics_2.png", dpi=200)
+    print("Saved figure:", "images/wheelie_fullDynamics_2.png")
 
 if __name__ == "__main__":
     simulate_closed_loop()
