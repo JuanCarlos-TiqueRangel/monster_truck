@@ -17,8 +17,8 @@ The model is affine-in-parameters for each channel:
     v_dot      ~=  b . phi_v(theta, v, tau)        (linear  channel)
     omega_dot  ~=  a . phi_w(theta, omega, v, tau) (angular channel)
 
-The GP residual model (see gp_residual.py) then captures only the sharp,
-nonlinear part that this smooth linear model cannot explain (contact spikes).
+The streaming GP residual model (see SSGP.py) then captures only the
+sharp, nonlinear part this smooth linear model cannot explain (contact spikes).
 
 SINGLE SOURCE OF TRUTH
 ======================

@@ -2,24 +2,27 @@
 
 
 import math
-import sys
 import time
 from pathlib import Path
 
 import numpy as np
 
-# make the parent NMPC folder importable (rls / gp_residual / nmpc)
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from rls import RLS, RLSConfig, omega_regressor, v_regressor          # noqa: E402
-from gp_residual import GPResidual, GPConfig                          # noqa: E402
-from nmpc import WheelieParams                                        # noqa: E402
+# everything is local to this folder (self-contained MPPI stack)
+from rls import RLS, RLSConfig, omega_regressor, v_regressor
+# Residual learner: each config builds its own (gp_cfg.build()). SSGP.py (streaming
+# variational VFE, default) and online_sparseGP.py (recursive-FITC legacy) are fully
+# INDEPENDENT modules. Configs are re-exported so the driver scripts import from here.
+from SSGP import SSGPConfig, AdaptiveSSGPConfig                              # noqa: F401
+from online_sparseGP import StreamingGPConfig                               # noqa: F401
+from params import WheelieParams
 
-import mujoco                                                         # noqa: E402
+import mujoco
+import torch
 
 
-# ---- Scenario (kept identical to wheelie_gp_climb.py) ----
-XML_PATH = Path(__file__).resolve().parent.parent / "monster_truck_flip_2d.xml"
-GOAL_X = 5.0
+# ---- Scenario ----
+XML_PATH = Path(__file__).resolve().parent / "monster_truck_flip_2d.xml"
+GOAL_X = 8.0
 SIM_TIME = 12.0
 CTRL_DT = 0.05
 
@@ -82,13 +85,12 @@ def run_episode(controller, p, gp_cfg, rls_cfg, *, xml_path=XML_PATH,
     cdt = csteps * sim_dt
     nsteps = int(round(sim_time / sim_dt))
 
-    # online learners (fresh each episode)
-    gp = GPResidual(n_features=4, max_points=gp_cfg.max_points,
-                    lengthscales=np.asarray(gp_cfg.lengthscales),
-                    sf2=gp_cfg.sf2, sn2=gp_cfg.sn2,
-                    novelty_thresh=gp_cfg.novelty_thresh,
-                    activation_thresh=gp_cfg.activation_thresh)
-    from nmpc import nominal_rls_seeds
+    # online learner (fresh each episode): the config builds its own learner
+    # (SSGPConfig -> streaming variational VFE; StreamingGPConfig -> recursive FITC;
+    # AdaptiveSSGPConfig -> VFE + adaptivity). All are drop-in and expose the same
+    # mpc_params() values. sn2_frac regularises the (proven irreducible) residual ~0.
+    gp = gp_cfg.build(n_features=4)
+    from params import nominal_rls_seeds
     a0, b0 = nominal_rls_seeds(p)
     rls_w = RLS(a0, forgetting=rls_cfg.forgetting, p0_scale=rls_cfg.p0_scale)
     rls_v = RLS(b0, forgetting=rls_cfg.forgetting, p0_scale=rls_cfg.p0_scale)
@@ -96,7 +98,8 @@ def run_episode(controller, p, gp_cfg, rls_cfg, *, xml_path=XML_PATH,
     goal = np.array([goal_x, 0.0, 0.0, 0.0])
     tau_prev = tau_cmd = 0.0
     last_state = None
-    hist = {k: [] for k in ("t", "x", "v", "pitch_deg", "tau", "solve_ms")}
+    hist = {k: [] for k in ("t", "x", "v", "pitch_deg", "tau", "cost", "solve_ms",
+                            "r_v", "r_w", "gp_v", "gp_w", "gp_v_std", "gp_w_std")}
     solve_times = []
 
     def read_state():
@@ -111,23 +114,37 @@ def run_episode(controller, p, gp_cfg, rls_cfg, *, xml_path=XML_PATH,
         nonlocal tau_prev, tau_cmd, last_state, cc
         s = read_state()
         x, v, theta, omega = s
+        # residual diagnostics for the residual plot (logging only -- does not touch
+        # the controller): measured residual + GP per-channel mean/std at that input.
+        r_v = r_w = gp_v = gp_w = 0.0
+        gp_v_std = gp_w_std = float(np.sqrt(getattr(gp_cfg, "sf2", 1.0)))
         if last_state is not None:
             _, vp, thp, omp = last_state
             phv = np.array(v_regressor(thp, vp, tau_cmd, sin=np.sin))
             phw = np.array(omega_regressor(thp, omp, vp, tau_cmd, cos=np.cos))
-            gp.observe(np.array([thp, omp, vp, tau_cmd]),
-                       (v - vp) / cdt - rls_v.predict(phv),
-                       (omega - omp) / cdt - rls_w.predict(phw))
-            if gp.n_seen % gp_cfg.refit_every == 0:
+            r_v = (v - vp) / cdt - rls_v.predict(phv)
+            r_w = (omega - omp) / cdt - rls_w.predict(phw)
+            z_prev = np.array([thp, omp, vp, tau_cmd])
+            gp_v, gp_v_std, gp_w, gp_w_std = gp.predict_channels(z_prev)   # pre-update estimate
+            gp.observe(z_prev, r_v, r_w)
+            if gp.n_seen % getattr(gp_cfg, "refit_every", 10) == 0:
                 gp.refit()
             rls_v.update(phv, (v - vp) / cdt)
             rls_w.update(phw, (omega - omp) / cdt)
 
+        # keep the MPPI rollout kernel in sync with the SSGP's fitted kernel,
+        # so the rollout interpolates the inducing values with the right kernel.
+        if getattr(gp, "ready", False) and hasattr(controller, "inv_l2"):
+            controller.inv_l2 = torch.as_tensor(1.0 / np.asarray(gp.l) ** 2,
+                                                dtype=controller.dtype, device=controller.device)
+            controller.sf2 = float(gp.sf2)
+
         t0 = time.perf_counter()
-        tau, _ = controller.solve(s, goal, tau_prev,
-                                  rls_w.theta, rls_v.theta, gp.mpc_params())
+        tau, info = controller.solve(s, goal, tau_prev,
+                                     rls_w.theta, rls_v.theta, gp.mpc_params())
         solve_ms = (time.perf_counter() - t0) * 1e3
         solve_times.append(solve_ms)
+        cost = float(info.get("cost", float("nan"))) if isinstance(info, dict) else float("nan")
 
         tau = float(np.clip(tau, p.tau_min, p.tau_max))
         tau_prev = tau_cmd = tau
@@ -137,11 +154,15 @@ def run_episode(controller, p, gp_cfg, rls_cfg, *, xml_path=XML_PATH,
 
         hist["t"].append(float(data.time)); hist["x"].append(x)
         hist["v"].append(v); hist["pitch_deg"].append(math.degrees(theta))
-        hist["tau"].append(tau); hist["solve_ms"].append(solve_ms)
+        hist["tau"].append(tau); hist["cost"].append(cost)
+        hist["solve_ms"].append(solve_ms)
+        hist["r_v"].append(float(r_v)); hist["r_w"].append(float(r_w))
+        hist["gp_v"].append(float(gp_v)); hist["gp_w"].append(float(gp_w))
+        hist["gp_v_std"].append(float(gp_v_std)); hist["gp_w_std"].append(float(gp_w_std))
         if verbose and cc % print_every == 0:
             print(f"t={data.time:5.2f} x={x:6.3f} v={v:6.3f} "
                   f"pitch={math.degrees(theta):6.1f} tau={tau:7.3f} "
-                  f"solve={solve_ms:5.1f}ms")
+                  f"cost={cost:11.1f} solve={solve_ms:5.1f}ms")
         cc += 1
 
     if render:
@@ -188,7 +209,7 @@ if __name__ == "__main__":
     # quick standalone test of MPPI through the harness
     from mppi import WheelieMPPI, MPPIConfig
     p = WheelieParams(v_max=1.5, v_min=-1.5)
-    gp_cfg = GPConfig()
+    gp_cfg = StreamingGPConfig()
     rls_cfg = RLSConfig(forgetting=0.9995)
     ctrl = WheelieMPPI(p, MPPIConfig(), gp_cfg)
     out = run_episode(ctrl, p, gp_cfg, rls_cfg, verbose=True)

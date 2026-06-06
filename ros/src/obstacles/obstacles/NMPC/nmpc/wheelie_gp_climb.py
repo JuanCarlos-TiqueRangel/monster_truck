@@ -8,7 +8,8 @@ MuJoCo driver for the obstacle-climbing wheelie task. This file only does the
 The control stack is split across modules so each piece is easy to debug:
 
     rls.py          online RLS identification of v_dot and omega_dot (always on)
-    gp_residual.py  streaming sparse GP for the contact residual
+    SSGP.py         streaming sparse variational GP for the contact residual
+                    (recursive-FITC legacy: online_sparseGP.py)
     nmpc.py         the NMPC predictor, cost and IPOPT solver
 
 Control loop, each control step:
@@ -26,9 +27,14 @@ import csv
 
 import numpy as np
 
+# everything is local to this folder (self-contained NMPC stack)
 from nmpc import WheelieParams, MPCConfig, WheelieNMPC, nominal_rls_seeds
 from rls import RLS, RLSConfig, omega_regressor, v_regressor
-from gp_residual import GPResidual, GPConfig
+# streaming variational (VFE) sparse GP (SSGP.py) and the recursive-FITC legacy
+# (online_sparseGP.py) are fully INDEPENDENT modules; each config builds its own
+# learner via gp_cfg.build(). The NMPC's reliable default is FITC (see GP below).
+from SSGP import SSGPConfig, AdaptiveSSGPConfig
+from online_sparseGP import StreamingGPConfig
 
 try:
     import mujoco
@@ -61,21 +67,24 @@ INITIAL_ROOT_PITCH_DEG = 0.0
 # ---- Goal: drive from start (A) to point B at this x position. The NMPC is a
 #      pure goal-reacher -- MPC.q_x below sets how hard it is pulled to the goal,
 #      which is also what gives it the authority to drive over an obstacle. ----
-GOAL_X = 5.0                        # target x position B [m]
+GOAL_X = 8.0                        # target x position B [m]
 
 
 # ============================================================
 # CONTROLLER TUNING
 # ------------------------------------------------------------
 # Every knob you would sweep lives here, in one place. Edit a value and
-# re-run; you should not need to open rls.py / nmpc.py / gp_residual.py.
+# re-run; you should not need to open rls.py / nmpc.py / SSGP.py.
 # (Defaults shown explicitly so a sweep is just a one-line change.)
 # ============================================================
 
 # -- Physical model + actuator/state limits (full list in nmpc.py) ----------
 #    v_max is capped low so the truck approaches obstacles at a controlled
 #    speed -- ramming at high speed launches/flips it instead of climbing.
-PARAMS = WheelieParams(v_max=1.5, v_min=-1.5)
+# theta_min=-30deg: braking induces a nose-DOWN pitch, so the old theta_min=0
+# bound made the brake trajectory infeasible (the truck could never stop). Allow
+# some nose-down so the NMPC can brake; it can still wheelie up to theta_max.
+PARAMS = WheelieParams(v_max=1.5, v_min=-1.5, theta_min=math.radians(-30.0))
 
 # -- RLS online identification (rls.py) -------------------------------------
 RLS_CFG = RLSConfig(
@@ -93,8 +102,8 @@ MPC = MPCConfig(
     #     Narrow operating point: q_omega is knife-edge (50 or 70 flip, 60 climbs).
     #     Change these carefully; see the note at the bottom of this block. ---
     q_x=15.0,           # GOAL weight: pull toward GOAL_X
-    q_v=8.0,            # speed regulation. Low -> enough authority to climb;
-                        #   the price is the truck OVERSHOOTS the goal (see notes)
+    q_v=20.0,           # velocity-REFERENCE tracking gain (climb authority comes
+                        #   from v_cruise now, so q_v can be high for a crisp stop)
     q_theta=6.0,        # pitch: low, so the truck is free to rear into a wheelie
     q_omega=60.0,       # pitch-RATE damping: catches the wheelie before it flips.
                         #   THE critical knob -- too low flips, too high won't climb
@@ -103,21 +112,39 @@ MPC = MPCConfig(
     q_terminal_theta=6.0,
     q_terminal_omega=60.0,
     ipopt_max_iter=80,
+    # --- CLEARS ALL THREE OBSTACLES AND STOPS (fixed weights, no PD/scheduling) ---
+    # goal-distance velocity reference (brakes to a stop) + omega-aware flip penalty
+    # (allows a tall HELD wheelie to climb but kills the tip-over rotation) + a
+    # velocity barrier. ALL THREE are load-bearing (ablation: drop any one -> stall
+    # or flip or runaway). The thing that makes them actually work is COLD-STARTING
+    # the solver (MPCConfig.warm_start=False, in nmpc.py): with a warm start IPOPT
+    # gets trapped in the cruising minimum and runs away; cold-started it finds the
+    # brake/reverse trajectory. Verified deterministic+fast: climbs box(1)+box(3)+
+    # cylinders(5) and stops at final_x~8.1, max|pitch|~57deg, no flip, no runaway.
+    v_ref_gain=0.5, v_cruise=1.3,
+    q_flip=5.0e3, theta_soft_deg=93.0,        # static cap is now just a backstop
+    q_flipw=2.0e3, theta_climb_deg=55.0,      # omega-aware: the real flip guard
+    q_vbar=5.0e3, v_hard=1.2,                 # tight speed barrier -> no runaway
 )
 # NOTE: this point CLIMBS the 0.20 m step but cannot also stop AT the goal --
 # climbing needs forward authority (low q_v) while stopping needs braking
 # (high q_v), and one fixed weight set can't switch between them. A clean
 # climb-AND-stop needs phase-dependent behavior (see the chat summary).
 
-# -- Streaming sparse GP residual model (gp_residual.py) --------------------
-GP = GPConfig(
-    max_points=20,            # dictionary size M (keep small for real-time)
-    sf2=4.0,                  # signal variance (kernel output scale)
-    sn2=0.25,                 # observation noise / ridge
-    novelty_thresh=0.85,      # add a new point only if this novel (0..1)
-    activation_thresh=0.6,    # |residual| to count as a contact event
-    lengthscales=(0.30, 2.0, 1.0, 3.0),   # ARD for z = [theta, omega, v, tau]
-    refit_every=1,            # recompute alpha every k observations
+# -- streaming sparse GP residual model (recursive FITC -> online_sparseGP.py) -
+# The NMPC's RELIABLE default is FITC. The variational SSGP (SSGP.py) is the
+# default for the MPPI, but it DESTABILISES this NMPC: the NMPC bakes its GP kernel
+# at COMPILE time (it is NOT re-synced to the GP's fitted kernel each step, the way
+# the MPPI rollout is), so it is sensitive to the residual's SHAPE -- and the VFE
+# swap is knife-edge (sn2_frac 2 stops, 2.5 RUNS AWAY, 3 stops, >=4 runs away).
+# Keep FITC here. To make SSGPConfig()/AdaptiveSSGPConfig() reliable on the NMPC,
+# nmpc.py would need to take the GP kernel as a runtime parameter (out of scope).
+GP = StreamingGPConfig(
+    max_points=20,            # inducing-set size M (keep small for real-time)
+    warmup=60,                # steps buffered before the SGP fits its kernel
+    sn2_frac=2.0,             # noise/signal -> regularise irreducible residual ~0
+    lengthscales=(0.30, 2.0, 1.0, 3.0),   # NMPC rollout kernel ARD [theta,omega,v,tau]
+    sf2=4.0,                  # NMPC rollout kernel scale
 )
 
 
@@ -178,12 +205,11 @@ def main():
 
     nmpc = WheelieNMPC(p, cfg, gp_cfg)
 
-    # Streaming sparse GP residual model (online)
-    gp = GPResidual(n_features=4, max_points=gp_cfg.max_points,
-                    lengthscales=np.asarray(gp_cfg.lengthscales),
-                    sf2=gp_cfg.sf2, sn2=gp_cfg.sn2,
-                    novelty_thresh=gp_cfg.novelty_thresh,
-                    activation_thresh=gp_cfg.activation_thresh)
+    # streaming sparse GP residual learner (online): the config builds its own
+    # (here StreamingGPConfig -> recursive FITC; SSGPConfig -> variational VFE).
+    # sn2_frac regularises the (proven irreducible) residual toward ~0; the NMPC's
+    # compile-time kernel is harmless since alpha ~ 0 -> mean ~ 0. Drop-in.
+    gp = gp_cfg.build(n_features=4)
 
     # Two always-on RLS estimators, seeded from nominal physics.
     a0, b0 = nominal_rls_seeds(p)
@@ -231,6 +257,8 @@ def main():
 
     gp_v = gp_omega = 0.0
     gp_std = float(np.sqrt(gp_cfg.sf2))
+    gp_v_std = gp_w_std = float(np.sqrt(gp_cfg.sf2))   # per-channel predictive std (plot bands)
+    res_v = res_w = 0.0                                # measured residual the GP is fed (plot)
     last_state = None                  # previous NMPC state [x, v, theta, omega]
     rls_err_v = rls_err_w = 0.0
 
@@ -249,7 +277,7 @@ def main():
 
     def control_update():
         nonlocal tau_prev, tau_cmd, ctrl_cmd, solve_success, control_count
-        nonlocal last_state, gp_v, gp_omega, gp_std
+        nonlocal last_state, gp_v, gp_omega, gp_std, gp_v_std, gp_w_std, res_v, res_w
         nonlocal rls_err_v, rls_err_w
 
         state_now = read_nmpc_state()
@@ -272,6 +300,7 @@ def main():
             # (computed BEFORE the RLS update so the GP is not starved)
             r_v = v_dot_meas - rls_v.predict(phi_v)
             r_w = omega_dot_meas - rls_w.predict(phi_w)
+            res_v, res_w = r_v, r_w                 # measured residual (for the residual plot)
             z_prev = np.array([theta_p, omega_p, v_p, tau_cmd], dtype=float)
             gp.observe(z_prev, r_v, r_w)
             if gp.n_seen % gp_cfg.refit_every == 0:
@@ -285,6 +314,7 @@ def main():
         # --- 2. GP prediction at current state (logging / diagnostics) ---
         z_now = np.array([theta_now, omega_now, v_now, tau_cmd], dtype=float)
         gp_v, gp_omega, gp_std = gp.predict(z_now)
+        gp_v, gp_v_std, gp_omega, gp_w_std = gp.predict_channels(z_now)   # per-channel mean+std
 
         # --- 3. Solve NMPC toward the fixed goal B; q_x pulls us there and
         #        over whatever is in the way (RLS + GP supply the dynamics) ---
@@ -317,6 +347,8 @@ def main():
             "tau_cmd": tau_cmd, "ctrl_cmd": ctrl_cmd,
             "solve_success": int(solve_success),
             "gp_v": gp_v, "gp_omega": gp_omega, "gp_std": gp_std,
+            "gp_v_std": float(gp_v_std), "gp_w_std": float(gp_w_std),
+            "r_v": float(res_v), "r_omega": float(res_w),   # measured residual (GP target)
             "gp_active_points": gp.n_active,
             "rls_err_v": float(rls_err_v), "rls_err_omega": float(rls_err_w),
             # angular model a = [cos(theta), tau, omega, v, 1]
@@ -334,8 +366,8 @@ def main():
                 start = time.time()
                 if k % ctrl_steps == 0:
                     control_update()
+                    log_step()            # log once per CONTROL step (0.05 s)
                 mujoco.mj_step(model, data)
-                log_step()
                 viewer.sync()
                 sleep_time = sim_dt - (time.time() - start)
                 if sleep_time > 0.0:
@@ -345,8 +377,8 @@ def main():
         for k in range(n_steps):
             if k % ctrl_steps == 0:
                 control_update()
+                log_step()                # log once per CONTROL step (0.05 s)
             mujoco.mj_step(model, data)
-            log_step()
 
     final_pitch = PITCH_SIGN * float(data.qpos[root_pitch_qid])
     print("\nFinal state")
@@ -355,6 +387,7 @@ def main():
     print(f"pitch  = {math.degrees(final_pitch):.2f} deg")
     print(f"GP dictionary points used: {gp.n_active}")
     save_history_csv(history, CSV_PATH)
+    return history
 
 
 if __name__ == "__main__":
