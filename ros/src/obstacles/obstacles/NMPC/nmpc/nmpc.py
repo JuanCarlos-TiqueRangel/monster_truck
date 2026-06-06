@@ -31,7 +31,20 @@ import numpy as np
 import casadi as ca
 
 from rls import omega_regressor, v_regressor, N_OMEGA_FEATURES, N_V_FEATURES
-from gp_residual import casadi_gp_mean
+
+
+def casadi_gp_mean(z_sym, Z_sym, alpha_sym, lengthscales, sf2):
+    """Symbolic RBF/ARD GP mean
+        mu(z) = sum_i alpha_i * sf2 * exp(-0.5 ||(z - Z_i)/l||^2)
+    over the inducing set (Z, alpha) the streaming sparse GP supplies each solve.
+    Defined here so the NMPC has NO gp_residual dependency (uses only the SSGP)."""
+    M = Z_sym.shape[0]
+    l = ca.DM(np.asarray(lengthscales, dtype=float).reshape(-1))
+    out = 0
+    for i in range(M):
+        diff = (z_sym - Z_sym[i, :].T) / l
+        out += alpha_sym[i] * (sf2 * ca.exp(-0.5 * ca.dot(diff, diff)))
+    return out
 
 
 # ============================================================
@@ -75,6 +88,49 @@ class MPCConfig:
     q_terminal_theta: float = 250.0
     q_terminal_omega: float = 0.1
     ipopt_max_iter: int = 50
+
+    # Goal-distance velocity reference (same idea as the MPPI): the velocity cost
+    # tracks  v_ref = clip(v_ref_gain*(goal_x - x), +-v_cruise)  instead of 0, so
+    # the truck has authority to move/climb far from the goal but is driven to
+    # v=0 AT the goal -> it brakes to a stop instead of overshooting.
+    #
+    # OFF by default (v_ref_gain=0 -> old pure-setpoint cost q_v*v^2). Reason:
+    # enabling it makes the truck want forward speed, and THIS NMPC has no smooth
+    # flip penalty -- only a hard theta_max=100deg bound (above the ~90deg
+    # tip-over). So it pops a wheelie chasing v_ref and flips, even on flat ground
+    # (the MPPI's flip_penalty stops that; the NMPC has nothing equivalent).
+    # To use it cleanly the NMPC needs a smooth pitch/flip penalty + retune --
+    # see notes in wheelie_gp_climb.py. The MECHANISM is here and correct.
+    v_ref_gain: float = 0.0
+    v_cruise: float = 1.2
+
+    # Smooth flip penalty (the piece the NMPC lacked vs the MPPI). A one-sided,
+    # differentiable barrier on pitch:  q_flip * max(0, |theta| - theta_soft)^2,
+    # so popping a wheelie past theta_soft gets expensive -> the solver won't rear
+    # over the tip-over point chasing v_ref. q_flip=0 -> off.
+    q_flip: float = 0.0
+    theta_soft_deg: float = 80.0
+
+    # Smooth velocity barrier (the MPPI has one; the NMPC only had a hard plan
+    # bound that reality violates after a contact launch). q_vbar*max(0,v^2-v_hard^2)^2
+    # -> the cost itself fights overspeed, killing the post-obstacle runaway.
+    q_vbar: float = 0.0
+    v_hard: float = 2.5
+
+    # omega-aware flip penalty: penalise ROTATING FURTHER UP while already reared,
+    #   q_flipw * max(0, theta - theta_climb) * max(0, omega)
+    # -> a tall wheelie that is HELD or RECOVERING (omega<=0) is allowed (needed to
+    # climb), but accelerating the rotation toward a tip-over is expensive. This
+    # decouples "high wheelie to climb" from "flip", unlike the static theta cap.
+    q_flipw: float = 0.0
+    theta_climb_deg: float = 55.0
+
+    # warm_start=False -> COLD-START IPOPT every step. A warm start (re-using the
+    # previous plan) traps the local solver in the "keep cruising" minimum: once
+    # the truck overshoots the goal it never finds the brake/reverse trajectory
+    # (the cost screams to reverse, but the solver can't walk there). Cold-starting
+    # lets it reverse -> it brakes to a stop, and it's also FASTER here (~10ms).
+    warm_start: bool = False
 
 
 def nominal_rls_seeds(p: WheelieParams):
@@ -138,7 +194,7 @@ class WheelieNMPC:
         """Continuous-time dynamics x_dot = f(x, u) with RLS model + GP residual."""
         theta, omega, v, tau = x[2], x[3], x[1], u[0]
 
-        # GP residual feature z = [theta, omega, v, tau] (matches GPResidual)
+        # GP residual feature z = [theta, omega, v, tau] (streaming GP feature order)
         z = ca.vertcat(theta, omega, v, tau)
         gp_v = self._soft_clip(
             casadi_gp_mean(z, Z, alpha_v, self.gp_l, self.gp_cfg.sf2),
@@ -195,15 +251,52 @@ class WheelieNMPC:
         Qf = ca.diag(ca.vertcat(cfg.q_x, cfg.q_v,
                                 cfg.q_terminal_theta, cfg.q_terminal_omega))
 
+        def with_vref(xk):
+            # replace the velocity-error component (v - ref_v) with (v - v_ref).
+            # v_ref saturates to +-v_cruise via tanh (SMOOTH, so IPOPT converges --
+            # a clip(fmax/fmin) here stalls it just like a non-smooth penalty):
+            #   v_ref = v_cruise * tanh(v_ref_gain*(goal_x - x)/v_cruise)
+            vc = cfg.v_cruise
+            v_ref = vc * ca.tanh(cfg.v_ref_gain * (ref[0] - xk[0]) / vc) if cfg.v_ref_gain > 0 else 0.0
+            return ca.vertcat(xk[0] - ref[0], xk[1] - v_ref,
+                              xk[2] - ref[2], xk[3] - ref[3])
+
+        theta_soft = math.radians(cfg.theta_soft_deg)
+
+        def _smooth_relu(s):
+            return 0.5 * (s + ca.sqrt(s * s + 1e-4))      # smooth max(0, s)
+
+        v_hard2 = cfg.v_hard ** 2
+
+        def flip_pen(xk):
+            # one-sided barrier on theta^2 beyond theta_soft, made SMOOTH so IPOPT
+            # (a smooth-NLP solver) converges -- fmax/fabs kinks stall it.
+            return cfg.q_flip * _smooth_relu(xk[2] ** 2 - theta_soft ** 2) ** 2
+
+        def vbar_pen(xk):
+            # one-sided barrier on v^2 beyond v_hard (anti-runaway), smooth.
+            return cfg.q_vbar * _smooth_relu(xk[1] ** 2 - v_hard2) ** 2
+
+        theta_climb = math.radians(cfg.theta_climb_deg)
+
+        def flipw_pen(xk):
+            # penalise up-rotation (omega>0) while reared past theta_climb -> stops
+            # the tip-over but allows a held/recovering tall wheelie. Smooth.
+            return (cfg.q_flipw * _smooth_relu(xk[2] - theta_climb)
+                    * _smooth_relu(xk[3]))
+
         for k in range(N):
             xk, uk = X[:, k], U[:, k]
-            e = xk - ref
+            e = with_vref(xk)
             du = (uk[0] - tau_prev) if k == 0 else (uk[0] - U[0, k - 1])
-            obj += ca.mtimes([e.T, Q, e]) + cfg.r_tau * uk[0]**2 + cfg.r_dtau * du**2
+            obj += (ca.mtimes([e.T, Q, e]) + cfg.r_tau * uk[0]**2
+                    + cfg.r_dtau * du**2
+                    + flip_pen(xk) + vbar_pen(xk) + flipw_pen(xk))
             g.append(X[:, k + 1] - self._rk4_ca(xk, uk, a, b, Z, alpha_v, alpha_w))
 
-        eN = X[:, N] - ref
-        obj += ca.mtimes([eN.T, Qf, eN])
+        eN = with_vref(X[:, N])
+        obj += (ca.mtimes([eN.T, Qf, eN]) + flip_pen(X[:, N])
+                + vbar_pen(X[:, N]) + flipw_pen(X[:, N]))
 
         opt_vars = ca.vertcat(ca.reshape(X, -1, 1), ca.reshape(U, -1, 1))
         nlp = {"f": obj, "x": opt_vars, "g": ca.vertcat(*g), "p": P}
@@ -226,7 +319,7 @@ class WheelieNMPC:
 
     def _initial_guess(self, state, tau_prev):
         N = self.cfg.N
-        if self.last_solution is not None:
+        if self.cfg.warm_start and self.last_solution is not None:
             sol = self.last_solution.copy()
             X_sol = sol[:self.nX].reshape((self.nx, N + 1), order="F")
             U_sol = sol[self.nX:].reshape((self.nu, N), order="F")
@@ -250,7 +343,7 @@ class WheelieNMPC:
         tau_prev : float, last applied torque (for du penalty / warm start)
         a        : (n_a,) angular RLS coefficients
         b        : (n_b,) linear  RLS coefficients
-        gp_params: flat GP parameter vector from GPResidual.mpc_params()
+        gp_params: flat GP parameter vector from the streaming GP's mpc_params()
 
         Returns (tau, info).
         """

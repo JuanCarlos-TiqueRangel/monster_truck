@@ -24,7 +24,67 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
-from mppi_dynamics import rk4_batch
+# ---------------------------------------------------------------------------
+# Batched (GPU) rollout model -- merged in from the former mppi_dynamics.py.
+# Same gray-box model the CasADi NMPC uses (RLS linear part + sparse-GP residual
+# mean), vectorised over K rollouts so one MPPI step is a single GPU kernel:
+#     x_dot     = v
+#     v_dot     = b . [tau, v, sin(theta), 1]        + gp_v(z)
+#     theta_dot = omega
+#     omega_dot = a . [cos(theta), tau, omega, v, 1] + gp_omega(z)
+#     z = [theta, omega, v, tau]
+# Regressor order MUST match rls.py (omega=[cos th, tau, om, v, 1],
+#                                     v   =[tau, v, sin th, 1]).
+# ---------------------------------------------------------------------------
+
+# Physical clamps on the GP residual contribution (identical to nmpc.py), so a
+# mis-learned / extrapolating GP cannot inject unphysical accelerations.
+GP_V_CLAMP = 1.5 * 9.81      # max |longitudinal residual accel|  [m/s^2]
+GP_OMEGA_CLAMP = 8.0         # max |pitch residual accel|         [rad/s^2]
+
+
+def _soft_clip(val, lim):
+    """Smooth, differentiable clamp to [-lim, lim] (matches nmpc.py)."""
+    return lim * torch.tanh(val / lim)
+
+
+def gp_mean_batch(z, Z, alpha_v, alpha_w, inv_l2, sf2):
+    """Batched sparse-GP mean for both channels. z:(K,4) [theta,omega,v,tau],
+    Z:(M,4) inducing, alpha_*:(M,), inv_l2:(4,), sf2:float -> (gp_v, gp_w) each
+    (K,). Inactive dictionary slots carry alpha=0 so they contribute nothing."""
+    diff = z[:, None, :] - Z[None, :, :]                 # (K, M, 4)
+    d2 = (diff * diff * inv_l2[None, None, :]).sum(-1)   # (K, M)
+    k = sf2 * torch.exp(-0.5 * d2)                       # (K, M)
+    gp_v = _soft_clip(k @ alpha_v, GP_V_CLAMP)
+    gp_w = _soft_clip(k @ alpha_w, GP_OMEGA_CLAMP)
+    return gp_v, gp_w
+
+
+def f_batch(state, tau, a, b, Z, alpha_v, alpha_w, inv_l2, sf2):
+    """Continuous-time batched dynamics x_dot=f(x,u). state:(K,4)=[x,v,theta,
+    omega], tau:(K,), a:(5,) angular RLS, b:(4,) linear RLS -> x_dot:(K,4)."""
+    v = state[:, 1]
+    theta = state[:, 2]
+    omega = state[:, 3]
+    cos_t = torch.cos(theta)
+    sin_t = torch.sin(theta)
+    z = torch.stack([theta, omega, v, tau], dim=-1)      # (K, 4)
+    gp_v, gp_w = gp_mean_batch(z, Z, alpha_v, alpha_w, inv_l2, sf2)
+    # v_dot = b . [tau, v, sin(theta), 1] + gp_v
+    v_dot = b[0] * tau + b[1] * v + b[2] * sin_t + b[3] + gp_v
+    # omega_dot = a . [cos(theta), tau, omega, v, 1] + gp_w
+    omega_dot = a[0] * cos_t + a[1] * tau + a[2] * omega + a[3] * v + a[4] + gp_w
+    return torch.stack([v, v_dot, omega, omega_dot], dim=-1)
+
+
+def rk4_batch(state, tau, dt, a, b, Z, alpha_v, alpha_w, inv_l2, sf2):
+    """One RK4 integration step, batched over K."""
+    args = (a, b, Z, alpha_v, alpha_w, inv_l2, sf2)
+    k1 = f_batch(state, tau, *args)
+    k2 = f_batch(state + 0.5 * dt * k1, tau, *args)
+    k3 = f_batch(state + 0.5 * dt * k2, tau, *args)
+    k4 = f_batch(state + dt * k3, tau, *args)
+    return state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
 
 @dataclass
@@ -49,6 +109,14 @@ class MPPIConfig:
     flip_threshold_deg: float = 85.0    # |pitch| beyond this counts as a flip
     flip_penalty: float = 5.0e4         # flat cost added to any rollout that flips
     v_barrier: float = 50.0             # soft penalty weight for |v| > p.v_max
+
+    # Goal-distance velocity reference: the velocity cost tracks
+    #   v_ref = clip(v_ref_gain*(goal_x - x), +-v_cruise)
+    # so it cruises toward the goal and v_ref -> 0 AT the goal, making the
+    # optimiser brake to a stop instead of overshooting. v_ref_gain=0 recovers
+    # the old q_v*v^2 cost (which does not stop).
+    v_ref_gain: float = 0.6
+    v_cruise: float = 1.2
 
     device: str = "cuda"
     dtype: torch.dtype = torch.float32
@@ -92,7 +160,7 @@ class WheelieMPPI:
         ref      : (4,) goal [x, v, theta, omega]
         tau_prev : float
         a, b     : RLS coefficients (5,), (4,)
-        gp_params: flat [Z(M*d), alpha_v(M), alpha_w(M)]  (== GPResidual.mpc_params())
+        gp_params: flat [Z(M*d), alpha_v(M), alpha_w(M)]  (streaming GP's mpc_params())
         Returns (tau, info).
         """
         cfg, p, M, d = self.cfg, self.p, self.M, self.d
@@ -121,16 +189,20 @@ class WheelieMPPI:
         flip_thr = self.flip_threshold
         vmax = p.v_max
 
+        gx = goal[0]
+        vc = cfg.v_cruise
         for k in range(N):
             tau_k = u[:, k]
             e = states - goal[None, :]
             du = tau_k - tau_prev_k
             v = states[:, 1]
             theta = states[:, 2]
+            # goal-distance velocity reference: brake to a stop at the goal
+            v_ref = torch.clamp(cfg.v_ref_gain * (gx - states[:, 0]), -vc, vc)
 
             cost = cost + (
                 cfg.q_x * e[:, 0] ** 2
-                + cfg.q_v * e[:, 1] ** 2
+                + cfg.q_v * (v - v_ref) ** 2
                 + cfg.q_theta * e[:, 2] ** 2
                 + cfg.q_omega * e[:, 3] ** 2
                 + cfg.r_tau * tau_k ** 2
@@ -144,9 +216,10 @@ class WheelieMPPI:
             tau_prev_k = tau_k
 
         eN = states - goal[None, :]
+        v_refN = torch.clamp(cfg.v_ref_gain * (gx - states[:, 0]), -vc, vc)
         cost = cost + (
             cfg.q_x * eN[:, 0] ** 2
-            + cfg.q_v * eN[:, 1] ** 2
+            + cfg.q_v * (states[:, 1] - v_refN) ** 2
             + cfg.q_terminal_theta * eN[:, 2] ** 2
             + cfg.q_terminal_omega * eN[:, 3] ** 2
         )

@@ -20,66 +20,72 @@
       <light name="sun" pos="0 0 100" dir="0 0 -1" diffuse="1 1 1"/>
       <geom name="ground" type="plane" size="100 100 0.1" rgba="1 1 1 1"/>
 
-      <!-- fixed reproducible scenario: one climbable rounded obstacle -->
-      <!-- <geom name="obs_box_1" type="box" pos="2.0 0.0 0.05" size="0.30 0.30 0.1"
-            rgba="0.2 0.2 0.8 1" friction="5.01 0.01 0.0005"/>
-      <geom name="pole_box_1" type="cylinder" pos="1.9 0.0 0.12" size="0.10 0.30"
-            euler="1.5708 0 0" rgba="0.2 0.7 0.2 1" friction="5.01 0.01 0.0005"/>
-      <geom name="pole_box_2" type="cylinder" pos="2.2 0.0 0.15" size="0.10 0.3"
-            euler="1.5708 0 0" rgba="0.2 0.7 0.2 1" friction="5.01 0.01 0.0005"/> -->
+      <!-- obstacles single box-->
+      <geom name="obs_box_1" type="box"
+            pos="1.0 0.0 0.05"
+            size="0.30 0.30 0.1"
+            rgba="0.2 0.2 0.8 1"
+            friction="5.01 0.01 0.0005"/>
+
+      <!-- Bigger obstacles single box-->
+      <geom name="obs_box_2" type="box"
+            pos="3.0 0.0 0.1"
+            size="0.30 0.30 0.1"
+            rgba="0.2 0.2 0.8 1"
+            friction="5.01 0.01 0.0005"/>
 
 
       <!-- obstacles rounded cilinders-->
-      <!-- <geom name="obs_box_1" type="box"
-            pos="2.0 0.0 0.05"
+      <geom name="obs_box_3" type="box"
+            pos="5.0 0.0 0.05"
             size="0.30 0.30 0.1"
             rgba="0.2 0.2 0.8 1"
             friction="5.01 0.01 0.0005"/>
 
       <geom name="pole_box_1" type="cylinder"
-            pos="1.9 0.0 0.12"
+            pos="4.9 0.0 0.12"
             size="0.10 0.30"
             euler="1.5708 0 0"
             rgba="0.2 0.7 0.2 1"
             friction="5.01 0.01 0.0005"/>
 
       <geom name="pole_box_2" type="cylinder"
-            pos="2.2 0.0 0.15"
+            pos="5.2 0.0 0.15"
             size="0.10 0.3"
             euler="1.5708 0 0"
             rgba="0.2 0.7 0.2 1"
-            friction="5.01 0.01 0.0005"/> -->
+            friction="5.01 0.01 0.0005"/>
 
 
       <!-- obstacles boxes-->
-      <geom name="obs_box_1" type="box"
-            pos="2.0 0.0 0.03"
-            size="0.30 0.30 0.09"
+      <geom name="obs_box_4" type="box"
+            pos="7.0 0.0 0.03"
+            size="0.30 0.30 0.05"
             rgba="0.2 0.2 0.8 1"
             friction="5.01 0.01 0.0005"/>
 
-      <geom name="obs_box_2" type="box"
-            pos="2.2 0.15 0.09"
-            size="0.10 0.10 0.09"
+      <geom name="obs_box_5" type="box"
+            pos="7.2 0.15 0.09"
+            size="0.10 0.10 0.05"
             rgba="0.4 0.2 0.8 1"
             friction="7.01 0.01 0.0009"/>
 
-      <geom name="obs_box_3" type="box"
-            pos="1.8 -0.15 0.09"
-            size="0.10 0.10 0.09"
+      <geom name="obs_box_6" type="box"
+            pos="6.8 -0.15 0.09"
+            size="0.10 0.10 0.05"
             rgba="0.7 0.3 0.4 1"
             friction="5.01 0.01 0.0007"/>
 
-      <geom name="obs_box_4" type="box"
-            pos="1.8 0.15 0.09"
-            size="0.10 0.10 0.09"
+      <geom name="obs_box_7" type="box"
+            pos="6.8 0.15 0.09"
+            size="0.10 0.10 0.05"
             rgba="0.2 0.2 0.8 1"
             friction="5.01 0.01 0.0005"/>
 
 
       <!-- Green bar at the end-->
       <geom name="pole_1" type="cylinder"
-            pos="5.0 0.0 2.05"
+            pos="8.0 0.0 2.05"
             size="0.10 1.50"
             euler="1.5708 0 0"
             rgba="0.2 0.7 0.2 1"
