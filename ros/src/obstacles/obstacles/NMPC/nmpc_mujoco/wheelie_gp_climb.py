@@ -25,6 +25,9 @@ import time
 from pathlib import Path
 import csv
 
+import mujoco
+import mujoco.viewer as mj_viewer
+
 import numpy as np
 
 # everything is local to this folder (self-contained NMPC stack)
@@ -34,14 +37,6 @@ from rls import RLS, RLSConfig, omega_regressor, v_regressor
 # (online_sparseGP.py) are fully INDEPENDENT modules; each config builds its own
 # learner via gp_cfg.build(). The NMPC's reliable default is FITC (see GP below).
 from SSGP import SSGPConfig, AdaptiveSSGPConfig
-from online_sparseGP import StreamingGPConfig
-
-try:
-    import mujoco
-    import mujoco.viewer as mj_viewer
-    _HAS_MUJOCO = True
-except Exception:
-    _HAS_MUJOCO = False
 
 
 # ============================================================
@@ -139,7 +134,7 @@ MPC = MPCConfig(
 # swap is knife-edge (sn2_frac 2 stops, 2.5 RUNS AWAY, 3 stops, >=4 runs away).
 # Keep FITC here. To make SSGPConfig()/AdaptiveSSGPConfig() reliable on the NMPC,
 # nmpc.py would need to take the GP kernel as a runtime parameter (out of scope).
-GP = StreamingGPConfig(
+GP = SSGPConfig(
     max_points=20,            # inducing-set size M (keep small for real-time)
     warmup=60,                # steps buffered before the SGP fits its kernel
     sn2_frac=2.0,             # noise/signal -> regularise irreducible residual ~0
@@ -180,22 +175,6 @@ def save_history_csv(history, csv_path):
 
 
 # ============================================================
-# Obstacle XML helper
-# ============================================================
-
-def add_obstacle_xml_snippet() -> str:
-    """XML snippet to paste into <worldbody> of monster_truck_flip_2d.xml:
-    a static step obstacle the truck must climb."""
-    return """
-  <!-- ===== Obstacle: a static step the truck must climb ===== -->
-  <body name="obstacle" pos="1.5 0 0.05">
-    <geom name="obstacle_geom" type="box" size="0.15 0.5 0.05"
-          rgba="0.7 0.3 0.2 1" friction="1.0 0.01 0.001"/>
-  </body>
-"""
-
-
-# ============================================================
 # Main simulation
 # ============================================================
 
@@ -219,13 +198,6 @@ def main():
     # Fixed goal state B = [x_goal, stop, level, no spin]. The NMPC tracks this
     # every step; reaching it (q_x) is what drives the truck over the obstacle.
     GOAL = np.array([GOAL_X, 0.0, 0.0, 0.0], dtype=float)
-
-    if not _HAS_MUJOCO:
-        print("MuJoCo not available in this environment.")
-        print("This script is meant to run in your project next to the XML.")
-        print("\nObstacle XML snippet to add to <worldbody>:")
-        print(add_obstacle_xml_snippet())
-        return
 
     model = mujoco.MjModel.from_xml_path(str(XML_PATH))
     data = mujoco.MjData(model)

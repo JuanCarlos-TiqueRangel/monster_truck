@@ -54,12 +54,28 @@ MPPI_CFG = MPPIConfig(
 
 
 def main():
+    import json
+    import numpy as np
+    from pathlib import Path
+
     ctrl = WheelieMPPI(PARAMS, MPPI_CFG, GP_CFG)
     out = run_episode(ctrl, PARAMS, GP_CFG, RLS_CFG,
                       sim_time=SIM_TIME, render=RENDER, verbose=True)
     print("\nMetrics:")
     for k, val in out["metrics"].items():
         print(f"  {k:16s}: {val}")
+
+    # Auto-save data for plotting
+    data = {
+        "history": {k: (v.tolist() if isinstance(v, np.ndarray) else v)
+                    for k, v in out["history"].items()},
+        "metrics": out["metrics"]
+    }
+    data_file = Path(__file__).with_name("mppi_episode_data.json")
+    with open(data_file, 'w') as f:
+        json.dump(data, f, indent=2)
+    print(f"\n✓ Data saved to {data_file.name}")
+    print(f"  Now run: python3 make_paper_plot.py")
 
 
 if __name__ == "__main__":

@@ -27,7 +27,7 @@ the online posterior over u is the EXACT recursive-Bayes (Kalman/information) up
         mean(x*) = p*^T m,    var(x*) = p*^T S p* + (k(x*,x*) - k(Z,x*)^T Kzz^{-1} k(Z,x*))
         p = Kzz^{-1} k(Z, x)
 
-The residual wrapper emits the same mpc_params() values (Z, alpha_v, alpha_omega) as
+The residual wrapper emits the same mpc_params() values (Z, alpha_v_dot, alpha_omega_dot) as
 the legacy learner, so it is a DROP-IN for the controller (rollout/cost/barriers are
 untouched). Pick it via SSGPConfig().build() / AdaptiveSSGPConfig().build().
 """
@@ -61,6 +61,25 @@ def _kcenter(X, M, rng):
         idx.append(j)
         d2 = np.minimum(d2, np.sum((Xw - Xw[j])**2, 1))
     return np.array(idx)
+
+
+def _grid_inducing(bounds, M, d):
+    """Place ~M inducing points on a GRID covering `bounds` ([(lo,hi) per dim]) so the
+    GP has support over the WHOLE domain -- not just where the warmup happened (the
+    k-centre default confines Z to x~0, blinding the GP to the rest of the track).
+    For d=2 it uses 2 theta levels (flat / reared) with the rest spread over x."""
+    if d == 2:
+        n1 = 2
+        n0 = max(1, M // n1)
+        xs = np.linspace(bounds[0][0], bounds[0][1], n0)
+        ts = np.linspace(bounds[1][0], bounds[1][1], n1)
+        Z = np.array([[x, t] for x in xs for t in ts], dtype=float)
+    else:
+        n = max(2, int(round(M ** (1.0 / d))))
+        axes = [np.linspace(lo, hi, n) for (lo, hi) in bounds]
+        grids = np.meshgrid(*axes, indexing="ij")
+        Z = np.stack([g.ravel() for g in grids], axis=1).astype(float)
+    return Z[:M]
 
 
 # ── single-output streaming sparse VARIATIONAL (VFE) GP ──────────────────────
@@ -123,74 +142,83 @@ class SSGPResidual:
     """The streaming variational (VFE) residual learner. Uses SHARED inducing inputs
     Z + one kernel for both channels (the MPPI/NMPC rollout evaluates a single
     kernel), with a separate streaming posterior per channel. Exposes
-    Z, alpha_v, alpha_omega, active, l, sf2, sn2, mpc_params() so it is a drop-in
+    Z, alpha_v_dot, alpha_omega_dot, active, l, sf2, sn2, mpc_params() so it is a drop-in
     for the controller. Sets per-episode hyperparameters from a short warmup
     (empirical target variance for sf2 + a median-heuristic lengthscale), picks
     inducing inputs by greedy k-centre, then streams. q>0 -> bounded online
     adaptivity."""
 
-    def __init__(self, n_features=4, max_points=30, warmup=60, sn2_frac=0.1,
-                 ell_scale=1.0, seed=0, q=0.0):
+    def __init__(self, n_features=2, max_points=30, warmup=60, sn2_frac=0.1,
+                 ell_scale=1.0, seed=0, q=0.0, lengthscales=None, inducing_bounds=None):
         self.d = n_features
         self.M = max_points
         self.warmup = warmup
         self.sn2_frac = sn2_frac
         self.ell_scale = ell_scale
         self.q = float(q)
+        self.lengthscales = lengthscales          # if set: FIXED kernel (not warmup-fit)
+        self.inducing_bounds = inducing_bounds     # if set: GRID inducing pts over domain
         self.rng = np.random.default_rng(seed)
         self._buf = []
         self.ready = False
         self.n_seen = 0
         # controller-facing attributes (placeholders until warmup completes)
         self.Z = np.zeros((self.M, self.d))
-        self.alpha_v = np.zeros(self.M)
-        self.alpha_omega = np.zeros(self.M)
+        self.alpha_v_dot = np.zeros(self.M)
+        self.alpha_omega_dot = np.zeros(self.M)
         self.active = np.zeros(self.M, dtype=bool)
         self.l = np.ones(self.d)
         self.sf2 = 1.0
         self.sn2 = 0.25
-        self.gp_v = self.gp_w = None
+        self.gp_v_dot = self.gp_omega_dot = None
 
     def _init(self):
         X = np.array([b[0] for b in self._buf])
         Yv = np.array([b[1] for b in self._buf]); Yw = np.array([b[2] for b in self._buf])
-        ell = np.empty(self.d)                       # median-heuristic ARD lengthscales
-        for k in range(self.d):
-            dif = np.abs(X[:, k][:, None] - X[:, k][None, :])
-            med = np.median(dif[dif > 0]) if np.any(dif > 0) else 1.0
-            ell[k] = self.ell_scale * max(med, 1e-2)
+        if self.inducing_bounds is not None:
+            # FIXED grid over the whole domain + FIXED lengthscales. The warmup buffer
+            # only covers x~0, so data-driven Z (k-centre) and ell (median) would blind
+            # the GP to the obstacles further along -- this is the coverage fix.
+            Z = _grid_inducing(self.inducing_bounds, self.M, self.d)
+            ell = np.asarray(self.lengthscales, float).reshape(-1)
+        else:
+            ell = np.empty(self.d)                   # median-heuristic ARD lengthscales
+            for k in range(self.d):
+                dif = np.abs(X[:, k][:, None] - X[:, k][None, :])
+                med = np.median(dif[dif > 0]) if np.any(dif > 0) else 1.0
+                ell[k] = self.ell_scale * max(med, 1e-2)
+            Z = X[_kcenter(X, self.M, self.rng)]
         sf2 = max(float(np.var(Yv)), float(np.var(Yw)), 1e-3)
         sn2 = max(self.sn2_frac * sf2, 1e-3)
-        Z = X[_kcenter(X, self.M, self.rng)]
-        self.gp_v = StreamingSparseVGP(Z, ell, sf2, sn2, q=self.q)
-        self.gp_w = StreamingSparseVGP(Z, ell, sf2, sn2, q=self.q)
+        self.gp_v_dot = StreamingSparseVGP(Z, ell, sf2, sn2, q=self.q)
+        self.gp_omega_dot = StreamingSparseVGP(Z, ell, sf2, sn2, q=self.q)
         for z, rv, rw in self._buf:
-            self.gp_v.update(z, rv); self.gp_w.update(z, rw)
+            self.gp_v_dot.update(z, rv); self.gp_omega_dot.update(z, rw)
         self.Z = Z; self.l = ell; self.sf2 = sf2; self.sn2 = sn2
         self.active = np.ones(Z.shape[0], dtype=bool)
         self._refresh_alpha()
         self.ready = True
 
     def _refresh_alpha(self):
-        self.alpha_v = self.gp_v.alpha
-        self.alpha_omega = self.gp_w.alpha
+        self.alpha_v_dot = self.gp_v_dot.alpha
+        self.alpha_omega_dot = self.gp_omega_dot.alpha
 
-    def observe(self, z, r_v, r_omega):
+    def observe(self, z, r_v_dot, r_omega_dot):
         self.n_seen += 1
         z = np.asarray(z, float)
         if not self.ready:
-            self._buf.append((z, float(r_v), float(r_omega)))
+            self._buf.append((z, float(r_v_dot), float(r_omega_dot)))
             if len(self._buf) >= self.warmup:
                 self._init()
             return
-        self.gp_v.update(z, r_v); self.gp_w.update(z, r_omega)
+        self.gp_v_dot.update(z, r_v_dot); self.gp_omega_dot.update(z, r_omega_dot)
         self._refresh_alpha()
 
     def predict(self, z):
         if not self.ready:
             return 0.0, 0.0, 1.0
-        mv, vv = self.gp_v.predict(z)
-        mw, vw = self.gp_w.predict(z)
+        mv, vv = self.gp_v_dot.predict(z)
+        mw, vw = self.gp_omega_dot.predict(z)
         return mv, mw, float(np.sqrt(0.5 * (vv + self.sn2 + vw + self.sn2)))
 
     def predict_channels(self, z):
@@ -199,15 +227,62 @@ class SSGPResidual:
         if not self.ready:
             s = float(np.sqrt(self.sf2))
             return 0.0, s, 0.0, s
-        mv, vv = self.gp_v.predict(z)
-        mw, vw = self.gp_w.predict(z)
+        mv, vv = self.gp_v_dot.predict(z)
+        mw, vw = self.gp_omega_dot.predict(z)
         return mv, float(np.sqrt(vv + self.sn2)), mw, float(np.sqrt(vw + self.sn2))
 
     def refit(self):
         pass
 
     def mpc_params(self):
-        return np.concatenate([self.Z.reshape(-1), self.alpha_v, self.alpha_omega])
+        return np.concatenate([self.Z.reshape(-1), self.alpha_v_dot, self.alpha_omega_dot])
+
+    def state_dict(self) -> dict:
+        """Serialise the LEARNED state (fitted kernel + per-channel posterior) so the
+        GP can be restored in a later run via load_state_dict(). Returns {} if the GP
+        has not warmed up yet (nothing learned to save)."""
+        if not self.ready:
+            return {}
+        return {
+            "n_seen": self.n_seen,
+            "q": self.q,
+            "Z": self.Z,
+            "l": self.l,
+            "sf2": self.sf2,
+            "sn2": self.sn2,
+            "active": self.active,
+            "m_v_dot": self.gp_v_dot.m,
+            "S_v_dot": self.gp_v_dot.S,
+            "m_omega_dot": self.gp_omega_dot.m,
+            "S_omega_dot": self.gp_omega_dot.S,
+        }
+
+    def load_state_dict(self, sd: dict) -> None:
+        """Restore the learned state produced by state_dict() (e.g. from a previous
+        run) so this GP continues with that obstacle knowledge instead of warming up
+        from scratch. The two single-output GPs are rebuilt from (Z, l, sf2, sn2) --
+        which regenerates Kzz/Qzz -- then their posteriors (m, S) are overwritten."""
+        Z = np.asarray(sd["Z"], float)
+        if Z.shape != (self.M, self.d):
+            raise ValueError(
+                f"checkpoint Z shape {Z.shape} != expected ({self.M}, {self.d}); "
+                f"the saved model used a different max_points/n_features."
+            )
+        self.Z = Z
+        self.l = np.asarray(sd["l"], float)
+        self.sf2 = float(sd["sf2"])
+        self.sn2 = float(sd["sn2"])
+        self.q = float(sd["q"])
+        self.gp_v_dot = StreamingSparseVGP(self.Z, self.l, self.sf2, self.sn2, q=self.q)
+        self.gp_omega_dot = StreamingSparseVGP(self.Z, self.l, self.sf2, self.sn2, q=self.q)
+        self.gp_v_dot.m = np.asarray(sd["m_v_dot"], float)
+        self.gp_v_dot.S = np.asarray(sd["S_v_dot"], float)
+        self.gp_omega_dot.m = np.asarray(sd["m_omega_dot"], float)
+        self.gp_omega_dot.S = np.asarray(sd["S_omega_dot"], float)
+        self.active = np.asarray(sd["active"], bool)
+        self.n_seen = int(sd["n_seen"])
+        self.ready = True
+        self._refresh_alpha()
 
     @property
     def n_active(self):
@@ -225,14 +300,24 @@ class SSGPConfig:
     Verified to clear all 3 obstacles and stop at the goal."""
     max_points: int = 50        # inducing-set size M (also the controller's rollout M)
     warmup: int = 60            # control steps buffered before the SGP fits its kernel
-    sn2_frac: float = 4.0       # noise/signal -> regularises the irreducible residual ~0
+    sn2_frac: float = 1.0       # noise/signal -> moderate (was 4.0 = muzzled to ~0); the
+                                # 2-D (x,theta) blockage signal is concentrated, so let it fit
     refit_every: int = 1        # harness-loop cadence (the SGP updates online; ~no-op)
-    lengthscales: tuple = (0.30, 2.0, 1.0, 3.0)   # controller's INITIAL rollout kernel (ARD)
+    # ARD lengthscales for feature z = [x, theta]. The obstacle is a function of POSITION
+    # (and pitch), so the GP lives in (x, theta) only. x sharp (~0.4 m, resolve the box);
+    # theta broad (~0.7 rad, interpolate flat<->reared). FIXED (used by both GP and NMPC).
+    lengthscales: tuple = (0.40, 0.70)
+    # Inducing points on a GRID over (x, theta) so the GP has support over the WHOLE
+    # track -- not just the warmup region near x=0. Without this the GP is blind past
+    # the start and predicts 0 at every obstacle.
+    inducing_bounds: tuple = ((0.0, 11.0), (0.0, 1.20))
     sf2: float = 4.0            # initial rollout kernel scale; the SGP fits its own online
 
-    def build(self, n_features=4):
+    def build(self, n_features=2):
         return SSGPResidual(n_features=n_features, max_points=self.max_points,
-                            warmup=self.warmup, sn2_frac=self.sn2_frac, q=0.0)
+                            warmup=self.warmup, sn2_frac=self.sn2_frac, q=0.0,
+                            lengthscales=self.lengthscales,
+                            inducing_bounds=self.inducing_bounds)
 
 
 @dataclass
@@ -244,9 +329,11 @@ class AdaptiveSSGPConfig(SSGPConfig):
     system whose LEARNABLE dynamics actually drift (e.g. real hardware)."""
     q: float = 0.001
 
-    def build(self, n_features=4):
+    def build(self, n_features=2):
         return SSGPResidual(n_features=n_features, max_points=self.max_points,
-                            warmup=self.warmup, sn2_frac=self.sn2_frac, q=self.q)
+                            warmup=self.warmup, sn2_frac=self.sn2_frac, q=self.q,
+                            lengthscales=self.lengthscales,
+                            inducing_bounds=self.inducing_bounds)
 
 
 if __name__ == "__main__":
@@ -260,6 +347,6 @@ if __name__ == "__main__":
     print(f"StreamingSparseVGP ok: mean={m:+.3f} var={v:.3f} alpha_finite={np.all(np.isfinite(gp.alpha))}")
     res = SSGPConfig().build()
     for _ in range(80):
-        res.observe(rng.normal(size=4), float(rng.normal()), float(rng.normal()))
+        res.observe(rng.normal(size=2), float(rng.normal()), float(rng.normal()))
     print(f"SSGPResidual ok: ready={res.ready} n_active={res.n_active} "
           f"mpc_params={res.mpc_params().shape}")

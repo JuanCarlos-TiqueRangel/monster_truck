@@ -2,36 +2,43 @@
 """
 make_paper_plot.py
 ------------------
-Publication-quality figure of the MPPI controller climbing the three-obstacle
-course (box @1 m, bigger box @3 m, rounded cylinders @5 m) and braking to a stop
-at the goal (x = 8 m). Saves a vector PDF (drop straight into a paper) and a
-300-dpi PNG, both next to this file.
+Load pre-collected MPPI episode data and generate publication-quality figures.
+Saves vector PDF (drop straight into a paper) and 300-dpi PNG.
 
+First collect data with:
+    python3 collect_episode_data.py
+
+Then plot with:
     python3 make_paper_plot.py
 """
-import io
-import contextlib
+import json
 from pathlib import Path
 
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")            # headless: write files, no window needed
+# Use a backend that supports both saving and displaying
+try:
+    matplotlib.use("Qt5Agg")      # interactive with display
+except:
+    matplotlib.use("TkAgg")       # fallback
 import matplotlib.pyplot as plt
 
-# ---------------------------------------------------------------------------
-# 1) run one episode and collect the trajectory (uses the configured MPPI)
-# ---------------------------------------------------------------------------
-from run_mppi_render import PARAMS, GP_CFG, RLS_CFG, MPPI_CFG
-from mppi import WheelieMPPI
-from sim_harness import run_episode, GOAL_X
+from sim_harness import GOAL_X
 
-print("running the MPPI episode ...")
-with contextlib.redirect_stdout(io.StringIO()):          # keep the console clean
-    ctrl = WheelieMPPI(PARAMS, MPPI_CFG, GP_CFG)
-    out = run_episode(ctrl, PARAMS, GP_CFG, RLS_CFG,
-                      sim_time=40.0, render=False, verbose=False)
+# ---------------------------------------------------------------------------
+# 1) Load pre-collected episode data (instant, no simulation)
+# ---------------------------------------------------------------------------
+DATA_FILE = Path(__file__).with_name("mppi_beta_episode_data.json")
 
-h = out["history"]
+if not DATA_FILE.exists():
+    print(f"ERROR: {DATA_FILE.name} not found!")
+    print(f"Run this first: python3 collect_episode_data.py")
+    exit(1)
+
+print(f"Loading episode data from {DATA_FILE.name}...")
+with open(DATA_FILE) as f:
+    data = json.load(f)
+    h = data["history"]
 t     = np.asarray(h["t"])
 x     = np.asarray(h["x"])
 v     = np.asarray(h["v"])
@@ -105,9 +112,9 @@ for i, a in enumerate(ax):
 # matched y-axis ranges so MPPI and NMPC compare fairly side by side (set for the
 # working runs; widen these if you plot a run that flips / overshoots).
 ax[0].set_ylim(-0.5, 9.0)     # position [m]
-ax[1].set_ylim(-2.5, 4.5)     # velocity [m/s]
+ax[1].set_ylim(-2.5, 5.0)     # velocity [m/s]
 ax[2].set_ylim(-30, 110)      # pitch [deg]
-ax[3].set_ylim(-13, 9.0)      # torque [N.m]
+ax[3].set_ylim(-13, 15.0)      # torque [N.m]
 
 fig.align_ylabels(ax)
 fig.savefig(str(OUT) + ".pdf")
@@ -166,3 +173,6 @@ OUTR = Path(__file__).with_name("mppi_residual_paper_plot")
 figr.savefig(str(OUTR) + ".pdf")
 figr.savefig(str(OUTR) + ".png", dpi=300)
 print(f"saved  {OUTR.name}.pdf  and  {OUTR.name}.png")
+
+print("\nDisplaying plots...")
+plt.show()
