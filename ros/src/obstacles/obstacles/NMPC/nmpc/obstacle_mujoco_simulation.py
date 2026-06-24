@@ -13,8 +13,9 @@ from params_mujoco import WheelieParams, MPCConfig
 from rls import nominal_rls_parameters, rls_update
 from nmpc import NMPC            # <- NMPC (IPOPT) controller; swapped for MPPI below
 #from mppi import MPPI
-from SSGP import SSGPConfig                  # streaming sparse VARIATIONAL GP (VFE) -- default
-#from SGP import SGPConfig as SSGPConfig       # <- swap in: streaming sparse FITC GP (compare VFE vs FITC)
+#from SSGP import SSGPConfig                  # streaming sparse VARIATIONAL GP (VFE) -- default
+from SGP import SGPConfig as SSGPConfig       # <- swap in: streaming sparse FITC GP (compare VFE vs FITC)
+from prewheelie_learner import PreWheelieLearner   # episodic optimiser for the pre-wheelie angle
 
 # ============================================================
 # Easy-to-debug settings
@@ -61,6 +62,17 @@ N_EPISODES = 50
 # cheapest way to reach the goal (e.g. to climb the obstacle).
 GOAL_X = 10.0
 GOAL_TOL = 0.15          # an episode ends early once |x - GOAL_X| < GOAL_TOL
+
+# GP-DISCOVERED pre-wheelie: where the GP predicts a blockage > OBS_BLOCK [m/s^2], steer the
+# pitch reference to a controlled climb angle at the obstacle the GP LEARNED -- no hardcoded
+# location. THETA_OBS_DEG = the FIXED angle (0 -> off, rams the box).
+THETA_OBS_DEG = 0.0
+OBS_BLOCK = 8.0
+
+# PREWHEELIE_LEARN=True: an episodic learner (prewheelie_learner.py) DISCOVERS the fastest-safe
+# pre-wheelie angle online, improving the obstacle-crossing time each episode (ignores
+# THETA_OBS_DEG, sets the angle itself). False -> fixed THETA_OBS_DEG.
+PREWHEELIE_LEARN = True
 
 # Your MuJoCo root_pitch is negative during a backward wheelie.
 # This makes the controller see backward wheelie as positive pitch.
@@ -157,36 +169,80 @@ def load_model(path: Path, gp) -> tuple[np.ndarray, np.ndarray]:
     return d["a_rls"].copy(), d["P_rls"].copy()
 
 
+def plot_prewheelie_learning(learner) -> None:
+    """Plot the episodic pre-wheelie learning: crossing time (down=faster) and the discovered
+    angle, per episode. Also saves the learner's history JSON next to the model."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    h = learner.history
+    eps = list(range(len(h)))
+    tc = [r["t_cross"] for r in h]
+    bt = [r["best_time"] for r in h]
+    ang = [r["angle"] for r in h]
+    safe = [r["safe"] for r in h]
+
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 4.5))
+    a1.plot(eps, tc, "o-", ms=4, color="0.6", label="episode crossing time")
+    a1.plot(eps, bt, "-", lw=2.5, color="C0", label="best-so-far")
+    a1.set_xlabel("episode"); a1.set_ylabel("obstacle-crossing time [s]")
+    a1.set_title("learning curve  (DOWN = faster)"); a1.grid(True, alpha=.3); a1.legend(fontsize=9)
+    a2.plot(eps, ang, "o-", ms=4, color="C3")
+    for e, s in zip(eps, safe):                                  # mark unsafe (flip) episodes
+        if not s:
+            a2.scatter([e], [ang[e]], s=60, facecolors="none", edgecolors="k", label="_unsafe")
+    a2.axhline(learner.best_angle, color="0.7", ls="--", label=f"converged {learner.best_angle:.0f}$\\degree$")
+    a2.set_xlabel("episode"); a2.set_ylabel("pre-wheelie angle [deg]")
+    a2.set_title("discovered angle  (o = tried, circle = flipped)"); a2.grid(True, alpha=.3); a2.legend(fontsize=9)
+    fig.suptitle(f"Episodic pre-wheelie learning  ->  best {learner.best_angle:.0f}$\\degree$ at "
+                 f"{learner.best_time:.2f}s crossing")
+    fig.tight_layout()
+    img = Path(__file__).with_name("images")
+    img.mkdir(exist_ok=True)
+    fig.savefig(img / "prewheelie_learning.png", dpi=140, bbox_inches="tight")
+    learner.save(Path(__file__).with_name("prewheelie_learner.json"))
+    print(f"Saved: {img / 'prewheelie_learning.png'}  +  prewheelie_learner.json")
+
+
 # ============================================================
 # Main simulation
 # ============================================================
 
-def main():
+def main(seed=None, overrides=None):
+    """overrides: optional dict patching MPCConfig fields (and 'theta_obs_deg') so an
+    outer optimiser (cem_learn.py) can sweep cost parameters without editing the module."""
     p = WheelieParams()
+    rng = np.random.default_rng(seed) if seed is not None else None   # init jitter (multi-seed eval)
 
-    # Goal-reaching cost: reach GOAL_X, but stay FLAT by default. q_theta>0 penalizes
-    # pitch toward theta_ref=0, so on open ground the truck stays low; at the obstacle,
-    # staying flat means no progress, so the position cost (q_x) overpowers q_theta and
-    # forces a rear ONLY there. This also de-noises the residual (quiet on open ground,
-    # spike at the obstacle) so the GP can actually learn WHERE the obstacle is.
-    # Tune q_theta: raise it if it still wheelies on open ground; lower it if it can't
-    # rear enough to climb.
+    # MBRL REWARD (maximise return = minimise time). The planner optimises forward PROGRESS
+    # (w_progress) against the LEARNED SSGP model -- not a hand "stay-flat" cost. Because the
+    # model knows rearing reduces the obstacle blockage, the speed-maximising plan is to WHEELIE
+    # at the obstacle, so the maneuver EMERGES from the reward+model (no hand-set angle/location).
+    #   q_v=0       : NO slow-down penalty (the old q_v wanted v=0 -> it dawdled).
+    #   w_progress  : the reward -- reward forward speed every step.
+    #   q_theta SMALL: only a mild flat-preference, so it stays low on open ground (no blockage
+    #                 to fight) but rears at the obstacle where the model says speed pays.
+    #   q_flip/...   : the SAFETY part of the reward (don't tip over).
     cfg = MPCConfig(
         q_x=20.0,
-        q_v=2.0,
-        q_theta=50.0,
+        q_v=0.0,
+        q_theta=5.0,
         q_omega=0.0,
         q_terminal_theta=0.0,
         q_terminal_omega=0.0,
-        # Smooth flip penalty -- REQUIRED for goal-reaching on this NMPC: with no
-        # pitch reference it would otherwise rear past tip-over chasing the goal.
-        # Tune: raise q_flip if it still flips; lower it (or raise theta_soft_deg)
-        # if it can't rear enough to climb the box.
+        w_progress=15.0,
         q_flip=2000.0,
         theta_soft_deg=80.0,
         q_flipw=200.0,
         theta_climb_deg=55.0,
+        theta_obs_deg=THETA_OBS_DEG, obs_block=OBS_BLOCK,
     )
+    if overrides:                                  # CEM/optimiser candidate parameters
+        for k, val in overrides.items():
+            if hasattr(cfg, k):
+                setattr(cfg, k, float(val))
+            else:
+                raise KeyError(f"main() override '{k}' is not an MPCConfig field")
     gp_cfg = SSGPConfig()
     nmpc = NMPC(p, cfg, gp_cfg)        # <- IPOPT NMPC (kept for reference)
     #nmpc = MPPI(p, cfg, gp_cfg)          # sampling-based MPPI, same interface (.solve / .last_solution)
@@ -311,6 +367,7 @@ def main():
         # tau_cmd) -- the matched instant for phi (see read_accel) -- or the finite diff.
         accel_ok = ACCEL_SOURCE == "finite_diff" or last_accel is not None
         if last_control_state is not None and accel_ok:
+            a_saved, P_saved = (a_rls.copy(), P_rls.copy()) if RLS_FREEZE else (None, None)
             a_rls, P_rls, filtered_y_dot, last_rls_info = rls_update(
                 state_prev=last_control_state,
                 tau=tau_cmd,
@@ -324,10 +381,11 @@ def main():
                 sigma_v_dot=sigma_v_dot,
                 sigma_omega_dot=sigma_omega_dot,
                 clip_parameters=clip_parameters,
-                freeze=RLS_FREEZE,
                 y_dot_meas=(None if ACCEL_SOURCE == "finite_diff" else last_accel),
                 p=p,
             )
+            if RLS_FREEZE:          # hold weights fixed (the residual in last_rls_info is the GP target)
+                a_rls, P_rls = a_saved, P_saved
 
             # GP target = the velocity residual (the BLOCKAGE / deceleration the model
             # can't explain); it is the smooth, learnable obstacle signal (the omega
@@ -453,11 +511,15 @@ def main():
         nonlocal filtered_y_dot, last_control_state, res_v_dot, res_omega_dot, last_rls_info
         nonlocal gp_pred_v_dot_pre, gp_pred_omega_dot_pre, last_accel, last_gyro
 
+        # seeded start jitter (only when main(seed=...) is given) -> each seed is a different
+        # path through the chaotic climb, so a multi-seed sweep can see the learning trend.
+        dx = rng.normal(0.0, 0.03) if rng is not None else 0.0
+        dpitch = math.radians(rng.normal(0.0, 1.5)) if rng is not None else 0.0
         data.qpos[:] = 0.0
         data.qvel[:] = 0.0
-        data.qpos[root_x_qid] = INITIAL_X
+        data.qpos[root_x_qid] = INITIAL_X + dx
         data.qpos[root_z_qid] = INITIAL_Z
-        data.qpos[root_pitch_qid] = math.radians(INITIAL_ROOT_PITCH_DEG)
+        data.qpos[root_pitch_qid] = math.radians(INITIAL_ROOT_PITCH_DEG) + dpitch
         data.ctrl[drive_id] = 0.0
         data.time = 0.0
         mujoco.mj_forward(model, data)
@@ -526,16 +588,44 @@ def main():
         save_model(MODEL_PATH, gp, a_rls, P_rls)   # checkpoint after each episode
         return ep_history
 
+    # Episodic pre-wheelie learner: discovers the fastest-safe rear angle online (the GP
+    # supplies WHERE the obstacle is; this learns HOW MUCH to rear). It sets nmpc.theta_obs
+    # each episode (a runtime solver param -- no rebuild) and updates from the crossing time.
+    learner = PreWheelieLearner(angle0=0.0) if PREWHEELIE_LEARN else None
+
+    def crossing_metrics(ep_hist):
+        x = np.array([r["x"] for r in ep_hist]); t = np.array([r["time"] for r in ep_hist])
+        pit = np.array([abs(r["pitch_deg"]) for r in ep_hist])
+        reached = bool((np.abs(x - GOAL_X) < GOAL_TOL).any())
+        cleared = x >= 3.0                                  # obstacle (x=2) cleared
+        t_cross = float(t[cleared][0]) if cleared.any() else SIM_TIME
+        return t_cross, (float(pit.max()) if len(pit) else 0.0), reached
+
+    def do_episode(ep, viewer):
+        if learner is not None:
+            nmpc.theta_obs = math.radians(learner.angle)   # this episode's candidate angle
+        ep_hist = run_episode(ep, viewer)
+        if learner is not None:
+            tc, mp, rc = crossing_metrics(ep_hist)
+            learner.update(tc, mp, rc)
+            print(f"[learn] ep{ep:2d}: angle={learner.history[-1]['angle']:5.1f}deg  "
+                  f"t_cross={tc:5.2f}s  maxPitch={mp:3.0f}  ->  best {learner.best_angle:4.1f}deg / "
+                  f"{learner.best_time:.2f}s")
+        return ep_hist
+
     history = []
     if RENDER:
         with mj_viewer.launch_passive(model, data) as viewer:
             for ep in range(N_EPISODES):
                 if not viewer.is_running():
                     break
-                history.extend(run_episode(ep, viewer))
+                history.extend(do_episode(ep, viewer))
     else:
         for ep in range(N_EPISODES):
-            history.extend(run_episode(ep, None))
+            history.extend(do_episode(ep, None))
+
+    if learner is not None:
+        plot_prewheelie_learning(learner)
 
     names = [
         "b_tau", "b_v", "b_abs_v", "b_tau_cos", "b_0",
@@ -551,6 +641,7 @@ def main():
     if MODEL_PATH.exists():
         print(f"Model checkpoint: {MODEL_PATH}  "
               f"(set LOAD_MODEL=True to resume from it)")
+    return history
 
 
 if __name__ == "__main__":

@@ -86,7 +86,7 @@ def gp_surface(gp, xs, ths_rad):
 
 
 def make_slice_figure(args, gp_v, gp_w, xs, df, last_ep):
-    fig, (ax_v, ax_w) = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
+    fig, (ax_v, ax_w, ax_s) = plt.subplots(3, 1, figsize=(11, 11), sharex=True)
     colors = plt.cm.viridis(np.linspace(0.15, 0.85, len(args.thetas)))
 
     for theta_deg, c in zip(args.thetas, colors):
@@ -117,6 +117,12 @@ def make_slice_figure(args, gp_v, gp_w, xs, df, last_ep):
                                      label=f"online pred (ep {last_ep})")
                         ax_w.scatter(on["x"], on["gp_omega_dot_pred"], s=14, marker="x",
                                      color=c, alpha=0.8)
+                # (c) truck SPEED (x_dot) at this pitch slice, binned by x (mean) -- context
+                #     for the blockage: where it is fast/slow approaching & crossing the box.
+                xbin = (dd["x"] * 4).round() / 4
+                spd = dd.groupby(xbin)["x_dot"].mean()
+                ax_s.plot(spd.index, spd.values, color=c, lw=2,
+                          label=f"speed, $\\theta$={theta_deg:.0f}$\\degree$")
                 print(f"theta={theta_deg:5.1f} deg : {len(dd)} data pts within +/-{args.band:.0f} deg; "
                       f"v_dot residual peak |mu|={np.max(np.abs(mu_v)):.3f} m/s^2 "
                       f"at x={xs[np.argmax(np.abs(mu_v))]:.2f} m")
@@ -124,15 +130,17 @@ def make_slice_figure(args, gp_v, gp_w, xs, df, last_ep):
                 print(f"theta={theta_deg:5.1f} deg : no data within +/-{args.band:.0f} deg "
                       f"(GP still shown); peak |mu_v|={np.max(np.abs(mu_v)):.3f} m/s^2")
 
-    for ax in (ax_v, ax_w):
-        ax.axhline(0, color="0.8", lw=0.8)
+    for ax in (ax_v, ax_w, ax_s):
         for xo in OBSTACLE_XS:
             ax.axvline(xo, color="0.7", ls=":", lw=0.8)
         ax.grid(True)
         ax.legend(fontsize=8, ncol=max(1, len(args.thetas)))
+    for ax in (ax_v, ax_w):
+        ax.axhline(0, color="0.8", lw=0.8)
     ax_v.set_ylabel("v_dot residual  [m/s$^2$]\n(forward 'blockage' accel)")
     ax_w.set_ylabel("omega_dot residual  [rad/s$^2$]\n(pitch accel)")
-    ax_w.set_xlabel("x [m]")
+    ax_s.set_ylabel("x_dot (speed) [m/s]\n(measured, binned by x)")
+    ax_s.set_xlabel("x [m]")
     note = "shaded = $\\pm2\\sigma$, dots = measured data in band"
     if args.online:
         note += ", x = online pred"
@@ -141,15 +149,16 @@ def make_slice_figure(args, gp_v, gp_w, xs, df, last_ep):
     return fig
 
 
-def make_heatmap_figure(args, gp_v, gp_w, xs, Z):
-    """The full residual surface over the x-theta plane, inducing pts + slice lines on top."""
+def make_heatmap_figure(args, gp_v, gp_w, xs, Z, df):
+    """The full residual surface over the x-theta plane (GP v_dot, GP omega_dot) plus the
+    MEASURED speed x_dot over the same plane (from data), inducing pts + slice lines on top."""
     theta_hi = max(np.degrees(Z[:, 1].max()), max(args.thetas)) + 5.0
     ths = np.radians(np.linspace(0.0, theta_hi, 140))
     Gv = gp_surface(gp_v, xs, ths)
     Gw = gp_surface(gp_w, xs, ths)
     th_deg = np.degrees(ths)
 
-    fig, (ax_v, ax_w) = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
+    fig, (ax_v, ax_w, ax_s) = plt.subplots(3, 1, figsize=(11, 12), sharex=True)
     for ax, G, title, unit in (
         (ax_v, Gv, "v_dot residual (forward blockage)", "m/s$^2$"),
         (ax_w, Gw, "omega_dot residual (pitch accel)", "rad/s$^2$"),
@@ -168,9 +177,33 @@ def make_heatmap_figure(args, gp_v, gp_w, xs, Z):
         ax.set_ylabel("pitch $\\theta$ [deg]")
         ax.set_title(title)
         ax.legend(fontsize=8, loc="upper right")
-    ax_w.set_xlabel("x [m]")
-    fig.suptitle("GP residual surface over (x, $\\theta$)   "
-                 "(green dashed = your slice; the slice plot is a horizontal cut here)")
+
+    # measured SPEED x_dot binned over (x, theta) -- not a GP output, comes from the data
+    if df is not None and "x_dot" in df:
+        x_d = df["x"].to_numpy()
+        th_d = np.degrees(df["pitch_rad"].to_numpy())
+        v_d = df["x_dot"].to_numpy()
+        xe = np.linspace(xs.min(), xs.max(), 90)
+        te = np.linspace(0.0, th_deg.max(), 60)
+        ssum = np.histogram2d(x_d, th_d, bins=[xe, te], weights=v_d)[0]
+        cnt = np.histogram2d(x_d, th_d, bins=[xe, te])[0]
+        with np.errstate(invalid="ignore"):
+            S = np.where(cnt > 5, ssum / cnt, np.nan).T            # [theta, x] for pcolormesh
+        xc, tc = 0.5 * (xe[:-1] + xe[1:]), 0.5 * (te[:-1] + te[1:])
+        pc = ax_s.pcolormesh(xc, tc, S, cmap="viridis", shading="auto")
+        fig.colorbar(pc, ax=ax_s, label="speed x_dot [m/s]")
+        for theta_deg in args.thetas:
+            ax_s.axhline(theta_deg, color="r", ls="--", lw=1.3)
+        for xo in OBSTACLE_XS:
+            ax_s.axvline(xo, color="0.3", ls=":", lw=0.8)
+        ax_s.set_title("measured speed x_dot over (x, $\\theta$)  (empty cells = unvisited)")
+    else:
+        ax_s.text(0.5, 0.5, "no data (x_dot) -- run with a CSV", ha="center",
+                  va="center", transform=ax_s.transAxes)
+    ax_s.set_ylabel("pitch $\\theta$ [deg]")
+    ax_s.set_xlabel("x [m]")
+    fig.suptitle("Surfaces over (x, $\\theta$): GP residuals + measured speed   "
+                 "(dashed = your slice; the slice plot is a horizontal cut here)")
     fig.tight_layout()
     return fig
 
@@ -211,7 +244,7 @@ def main():
         csv = Path(args.csv) if args.csv else here / "obstacle_mujoco.csv"
         if csv.exists():
             import pandas as pd
-            df = pd.read_csv(csv, usecols=["episode", "x", "pitch_rad", "r_v_dot",
+            df = pd.read_csv(csv, usecols=["episode", "x", "x_dot", "pitch_rad", "r_v_dot",
                                            "r_omega_dot", "gp_v_dot_pred",
                                            "gp_omega_dot_pred", "gp_ready"])
             df = df[df["gp_ready"] > 0.5]
@@ -240,7 +273,7 @@ def main():
     save(fig_slice, f"gp_slice_theta{tag}.png")
 
     if args.heatmap:
-        fig_hm = make_heatmap_figure(args, gp_v, gp_w, xs, Z)
+        fig_hm = make_heatmap_figure(args, gp_v, gp_w, xs, Z, df)
         save(fig_hm, f"gp_surface_theta{tag}.png")
 
     plt.show()

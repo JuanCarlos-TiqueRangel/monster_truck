@@ -72,7 +72,6 @@ def rls_update(
     sigma_omega_dot: float = 5.0,
     nis_gate: float = float("inf"),
     clip_parameters: bool = True,
-    freeze: bool = False,
     y_dot_meas: np.ndarray | None = None,
     p: WheelieParams | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
@@ -137,23 +136,6 @@ def rls_update(
     # 5) Prediction and error.
     y_hat_before = H @ a
     error = y - y_hat_before
-
-    # 5b) FREEZE: hold the parameters fixed (no online adaptation). We still report the
-    # prediction error y - H@a against the FROZEN weights so the GP keeps learning its
-    # residual against a stationary model. a and P are returned unchanged.
-    if freeze:
-        info = {
-            "v_dot_raw": float(v_dot_raw),
-            "omega_dot_raw": float(omega_dot_raw),
-            "v_dot_measured": float(y[0]),
-            "omega_dot_measured": float(y[1]),
-            "v_dot_hat": float(y_hat_before[0]),
-            "omega_dot_hat": float(y_hat_before[1]),
-            "v_dot_error": float(error[0]),
-            "omega_dot_error": float(error[1]),
-            "skipped": True,
-        }
-        return a, P, filtered_y_dot, info
 
     # 6) Weighted/Joseph-form RLS.
     R = np.diag([sigma_v_dot**2, sigma_omega_dot**2])

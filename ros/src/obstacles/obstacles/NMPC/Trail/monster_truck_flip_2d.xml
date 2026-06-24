@@ -1,0 +1,563 @@
+<mujoco model="monster_truck_flip_2d">
+  <option gravity="0 0 -9.81" integrator="RK4" timestep="0.001"/>
+  <compiler angle="radian"/>
+
+  <default>
+    <geom contype="1" conaffinity="1"
+          friction="2.0 0.005 0.0002"
+          solref="0.015 1"
+          solimp="0.95 0.99 0.002"
+          density="1000"/>
+    <joint damping="0.02"/>
+  </default>
+
+  <visual>
+    <quality shadowsize="2048"/>
+    <map znear="0.01" zfar="20"/>
+  </visual>
+
+  <worldbody>
+      <light name="sun" pos="0 0 100" dir="0 0 -1" diffuse="1 1 1"/>
+      <geom name="ground" type="plane" size="100 100 0.1" rgba="1 1 1 1"/>
+
+      <!-- obstacles single box-->
+      <!-- <geom name="obs_box_1" type="box"
+            pos="1.0 0.0 0.05"
+            size="0.30 0.30 0.1"
+            rgba="0.2 0.2 0.8 1"
+            friction="5.01 0.01 0.0005"/> -->
+
+      <!-- Bigger obstacles single box-->
+      <!-- <geom name="obs_box_2" type="box"
+            pos="2.0 0.0 0.1"
+            size="0.30 0.30 0.1"
+            rgba="0.2 0.2 0.8 1"
+            friction="5.01 0.01 0.0005"/> -->
+
+
+      <!-- obstacles rounded cilinders-->
+      <!-- <geom name="obs_box_3" type="box"
+            pos="5.0 0.0 0.05"
+            size="0.30 0.30 0.1"
+            rgba="0.2 0.2 0.8 1"
+            friction="5.01 0.01 0.0005"/>
+
+      <geom name="pole_box_1" type="cylinder"
+            pos="4.9 0.0 0.12"
+            size="0.10 0.30"
+            euler="1.5708 0 0"
+            rgba="0.2 0.7 0.2 1"
+            friction="5.01 0.01 0.0005"/>
+
+      <geom name="pole_box_2" type="cylinder"
+            pos="5.2 0.0 0.15"
+            size="0.10 0.3"
+            euler="1.5708 0 0"
+            rgba="0.2 0.7 0.2 1"
+            friction="5.01 0.01 0.0005"/> -->
+
+
+      <!-- obstacles boxes-->
+      <!-- <geom name="obs_box_4" type="box"
+            pos="7.0 0.0 0.03"
+            size="0.30 0.30 0.09"
+            rgba="0.2 0.2 0.8 1"
+            friction="5.01 0.01 0.0005"/>
+
+      <geom name="obs_box_5" type="box"
+            pos="7.2 0.15 0.09"
+            size="0.10 0.10 0.09"
+            rgba="0.4 0.2 0.8 1"
+            friction="7.01 0.01 0.0009"/>
+
+      <geom name="obs_box_6" type="box"
+            pos="6.8 -0.15 0.09"
+            size="0.10 0.10 0.09"
+            rgba="0.7 0.3 0.4 1"
+            friction="5.01 0.01 0.0007"/>
+
+      <geom name="obs_box_7" type="box"
+            pos="6.8 0.15 0.09"
+            size="0.10 0.10 0.08"
+            rgba="0.2 0.2 0.8 1"
+            friction="5.01 0.01 0.0005"/> -->
+
+
+      <!-- Green bar at the end-->
+      <geom name="pole_1" type="cylinder"
+            pos="10.0 0.0 2.05"
+            size="0.10 1.50"
+            euler="1.5708 0 0"
+            rgba="0.2 0.7 0.2 1"
+            friction="5.01 0.01 0.0005"/>
+
+      <!--
+      Planar root: x-z translation + pitch about y
+      This replaces the freejoint and constrains the truck to 2D.
+      -->
+      <body name="planar_base" pos="0 0 0">
+      <joint name="root_x" type="slide" axis="1 0 0" damping="0.05"/>
+      <joint name="root_z" type="slide" axis="0 0 1" damping="0.05"/>
+      <joint name="root_pitch" type="hinge" axis="0 1 0" damping="0.02"/>
+
+      <!--
+        Approximate LMT 2.0 Son-Uva Digger dimensions:
+        length   0.561 m
+        width    0.411 m
+        height   0.310 m
+        wheelbase 0.381 m
+        mass     ~5.08 kg
+
+        Important:
+        The outer shell used for flipping is now rounded with colliding capsules,
+        especially the windshield and the rear back side.
+      -->
+      <body name="chassis" pos="0 0 0.0178" quat="1 0 0 0">
+
+        <site name="imu_site" pos="0 0 0.045" size="0.01" rgba="0 1 0 1"/>
+
+        <!-- =========================================================
+             CORE MASS / INNER CHASSIS
+             ========================================================= -->
+        <geom name="main_belly" type="box"
+              pos="0 0 0.018"
+              size="0.175 0.085 0.030"
+              rgba="0.10 0.10 0.12 1"
+              mass="2.10"/>
+
+        <geom name="upper_plate" type="box"
+              pos="0 0 0.055"
+              size="0.125 0.075 0.020"
+              rgba="0.15 0.15 0.18 1"
+              mass="0.42"/>
+
+        <geom name="front_bulkhead" type="box"
+              pos="0.145 0 0.025"
+              size="0.035 0.070 0.028"
+              rgba="0.08 0.08 0.10 1"
+              mass="0.10"/>
+
+        <geom name="rear_bulkhead" type="box"
+              pos="-0.155 0 0.025"
+              size="0.040 0.070 0.028"
+              rgba="0.08 0.08 0.10 1"
+              mass="0.10"/>
+
+        <geom name="skid_plate" type="box"
+              pos="0 0 -0.020"
+              size="0.195 0.080 0.010"
+              rgba="0.20 0.20 0.22 1"
+              mass="0.03"/>
+
+        <!-- =========================================================
+             UPDATED SHELL PROFILE
+             Flat roof with rounded corners, closer to the real shell.
+             Flat top length ~= 0.25 m from x=+0.075 to x=-0.175
+             ========================================================= -->
+
+        <geom name="hood_rib_1" type="capsule"
+              fromto="0.226 -0.100 0.066   0.226 0.100 0.066"
+              size="0.012"
+              rgba="0.04 0.09 0.40 1"
+              mass="0.028"/>
+
+        <geom name="hood_rib_2" type="capsule"
+              fromto="0.188 -0.099 0.076   0.188 0.099 0.076"
+              size="0.012"
+              rgba="0.04 0.09 0.40 1"
+              mass="0.028"/>
+
+        <geom name="hood_rib_3" type="capsule"
+              fromto="0.150 -0.097 0.089   0.150 0.097 0.089"
+              size="0.0115"
+              rgba="0.04 0.09 0.40 1"
+              mass="0.026"/>
+
+        <geom name="hood_rib_4" type="capsule"
+              fromto="0.114 -0.095 0.102   0.114 0.095 0.102"
+              size="0.0105"
+              rgba="0.04 0.09 0.40 1"
+              mass="0.023"/>
+
+        <!-- hood side shoulders -->
+        <geom name="hood_shoulder_l" type="capsule"
+              fromto="0.223 0.108 0.063   0.098 0.100 0.103"
+              size="0.007"
+              rgba="0.05 0.10 0.45 1"
+              mass="0.009"/>
+
+        <geom name="hood_shoulder_r" type="capsule"
+              fromto="0.223 -0.108 0.063   0.098 -0.100 0.103"
+              size="0.007"
+              rgba="0.05 0.10 0.45 1"
+              mass="0.009"/>
+
+        <geom name="windshield_rib_1" type="capsule"
+              fromto="0.145 -0.096 0.107   0.145 0.096 0.107"
+              size="0.012"
+              rgba="0.02 0.02 0.03 1"
+              mass="0.024"/>
+
+        <geom name="windshield_rib_2" type="capsule"
+              fromto="0.115 -0.094 0.124   0.115 0.094 0.124"
+              size="0.012"
+              rgba="0.02 0.02 0.03 1"
+              mass="0.024"/>
+
+        <geom name="windshield_rib_3" type="capsule"
+              fromto="0.085 -0.091 0.142   0.085 0.091 0.142"
+              size="0.011"
+              rgba="0.02 0.02 0.03 1"
+              mass="0.022"/>
+
+        <!-- A-pillars -->
+        <geom name="a_pillar_l" type="capsule"
+              fromto="0.152 0.094 0.098   0.075 0.090 0.154"
+              size="0.007"
+              rgba="0.02 0.02 0.03 1"
+              mass="0.010"/>
+
+        <geom name="a_pillar_r" type="capsule"
+              fromto="0.152 -0.094 0.098   0.075 -0.090 0.154"
+              size="0.007"
+              rgba="0.02 0.02 0.03 1"
+              mass="0.010"/>
+
+        <!-- slightly more rounded roof -->
+        <geom name="roof_rib_1" type="capsule"
+              fromto="0.075 -0.088 0.154   0.075 0.088 0.154"
+              size="0.011"
+              rgba="0.01 0.01 0.03 1"
+              mass="0.020"/>
+
+        <geom name="roof_rib_2" type="capsule"
+              fromto="0.025 -0.089 0.160   0.025 0.089 0.160"
+              size="0.0115"
+              rgba="0.01 0.01 0.03 1"
+              mass="0.021"/>
+
+        <geom name="roof_rib_3" type="capsule"
+              fromto="-0.025 -0.090 0.164   -0.025 0.090 0.164"
+              size="0.012"
+              rgba="0.01 0.01 0.03 1"
+              mass="0.022"/>
+
+        <geom name="roof_rib_4" type="capsule"
+              fromto="-0.075 -0.090 0.164   -0.075 0.090 0.164"
+              size="0.012"
+              rgba="0.01 0.01 0.03 1"
+              mass="0.022"/>
+
+        <geom name="roof_rib_5" type="capsule"
+              fromto="-0.125 -0.089 0.160   -0.125 0.089 0.160"
+              size="0.0115"
+              rgba="0.01 0.01 0.03 1"
+              mass="0.021"/>
+
+        <geom name="roof_rib_6" type="capsule"
+              fromto="-0.175 -0.088 0.154   -0.175 0.088 0.154"
+              size="0.011"
+              rgba="0.01 0.01 0.03 1"
+              mass="0.020"/>
+
+        <!-- center crown -->
+        <geom name="roof_spine" type="capsule"
+              fromto="0.070 0.000 0.159   -0.175 0.000 0.159"
+              size="0.0065"
+              rgba="0.02 0.02 0.04 1"
+              mass="0.010"/>
+
+        <!-- slightly lower side rails -> more dome -->
+        <geom name="roof_side_l" type="capsule"
+              fromto="0.075 0.086 0.149   -0.175 0.090 0.149"
+              size="0.0065"
+              rgba="0.02 0.02 0.04 1"
+              mass="0.009"/>
+
+        <geom name="roof_side_r" type="capsule"
+              fromto="0.075 -0.086 0.149   -0.175 -0.090 0.149"
+              size="0.0065"
+              rgba="0.02 0.02 0.04 1"
+              mass="0.009"/>
+
+        <geom name="rear_rib_1" type="capsule"
+              fromto="-0.205 -0.095 0.148   -0.205 0.095 0.148"
+              size="0.012"
+              rgba="0.02 0.02 0.03 1"
+              mass="0.022"/>
+
+        <geom name="rear_rib_2" type="capsule"
+              fromto="-0.225 -0.097 0.130   -0.225 0.097 0.130"
+              size="0.012"
+              rgba="0.02 0.02 0.03 1"
+              mass="0.022"/>
+
+        <geom name="rear_rib_3" type="capsule"
+              fromto="-0.245 -0.100 0.108   -0.245 0.100 0.108"
+              size="0.012"
+              rgba="0.02 0.02 0.03 1"
+              mass="0.022"/>
+
+        <geom name="rear_rib_4" type="capsule"
+              fromto="-0.258 -0.102 0.084   -0.258 0.102 0.084"
+              size="0.011"
+              rgba="0.02 0.02 0.03 1"
+              mass="0.020"/>
+
+        <geom name="rear_tail_lower" type="capsule"
+              fromto="-0.265 -0.103 0.064   -0.265 0.103 0.064"
+              size="0.010"
+              rgba="0.03 0.03 0.05 1"
+              mass="0.015"/>
+
+        <!-- rounded rear side corners -->
+        <geom name="rear_side_curve_l" type="capsule"
+              fromto="-0.175 0.094 0.154   -0.258 0.103 0.084"
+              size="0.008"
+              rgba="0.02 0.02 0.03 1"
+              mass="0.012"/>
+
+        <geom name="rear_side_curve_r" type="capsule"
+              fromto="-0.175 -0.094 0.154   -0.258 -0.103 0.084"
+              size="0.008"
+              rgba="0.02 0.02 0.03 1"
+              mass="0.012"/>
+
+        <!-- rear shoulder edges -->
+        <geom name="rear_shoulder_l" type="capsule"
+              fromto="-0.205 0.108 0.145   -0.262 0.110 0.090"
+              size="0.008"
+              rgba="0.05 0.10 0.45 1"
+              mass="0.010"/>
+
+        <geom name="rear_shoulder_r" type="capsule"
+              fromto="-0.205 -0.108 0.145   -0.262 -0.110 0.090"
+              size="0.008"
+              rgba="0.05 0.10 0.45 1"
+              mass="0.010"/>
+
+        <!-- =========================================================
+             LOWER SIDE PANELS
+             Keep material around the shell without blocking wheel space.
+             ========================================================= -->
+        <geom name="left_lower_front" type="box"
+              pos="0.105 0.099 0.072"
+              size="0.080 0.005 0.026"
+              rgba="0.03 0.03 0.05 1"
+              mass="0.015"/>
+
+        <geom name="right_lower_front" type="box"
+              pos="0.105 -0.099 0.072"
+              size="0.080 0.005 0.026"
+              rgba="0.03 0.03 0.05 1"
+              mass="0.015"/>
+
+        <geom name="left_lower_mid" type="box"
+              pos="-0.010 0.099 0.070"
+              size="0.050 0.005 0.032"
+              rgba="0.03 0.03 0.05 1"
+              mass="0.012"/>
+
+        <geom name="right_lower_mid" type="box"
+              pos="-0.010 -0.099 0.070"
+              size="0.050 0.005 0.032"
+              rgba="0.03 0.03 0.05 1"
+              mass="0.012"/>
+
+        <geom name="left_lower_rear" type="box"
+              pos="-0.155 0.101 0.078"
+              size="0.070 0.005 0.030"
+              euler="0 0.10 0"
+              rgba="0.03 0.03 0.05 1"
+              mass="0.012"/>
+
+        <geom name="right_lower_rear" type="box"
+              pos="-0.155 -0.101 0.078"
+              size="0.070 0.005 0.030"
+              euler="0 0.10 0"
+              rgba="0.03 0.03 0.05 1"
+              mass="0.012"/>
+
+        <!-- =========================================================
+             FRONT FACE
+             ========================================================= -->
+        <geom name="front_face" type="box"
+              pos="0.237 0 0.054"
+              size="0.008 0.093 0.028"
+              rgba="0.04 0.09 0.40 1"
+              mass="0.016"/>
+
+        <geom name="front_face_top" type="capsule"
+              fromto="0.233 -0.090 0.083   0.233 0.090 0.083"
+              size="0.007"
+              rgba="0.04 0.09 0.40 1"
+              mass="0.008"/>
+
+        <!-- =========================================================
+             VISUAL-ONLY WINDOWS
+             ========================================================= -->
+        <geom name="windshield_glass_1" type="box"
+              pos="0.128 0 0.121"
+              size="0.050 0.080 0.003"
+              euler="0 -2.55 0"
+              rgba="0.92 0.93 0.96 0.30"
+              contype="0" conaffinity="0" density="0"/>
+
+        <geom name="left_side_glass" type="box"
+              pos="-0.045 0.091 0.118"
+              size="0.047 0.002 0.024"
+              euler="0 0.08 0"
+              rgba="0.90 0.92 0.95 0.25"
+              contype="0" conaffinity="0" density="0"/>
+
+        <geom name="right_side_glass" type="box"
+              pos="-0.045 -0.091 0.118"
+              size="0.047 0.002 0.024"
+              euler="0 0.08 0"
+              rgba="0.90 0.92 0.95 0.25"
+              contype="0" conaffinity="0" density="0"/>
+
+        <!-- optional visual blue inner bars -->
+        <geom name="inner_bar_l" type="capsule"
+              fromto="0.025 0.083 0.080  -0.160 0.083 0.086"
+              size="0.005"
+              rgba="0.15 0.30 0.95 1"
+              contype="0" conaffinity="0" density="0"/>
+
+        <geom name="inner_bar_r" type="capsule"
+              fromto="0.025 -0.083 0.080  -0.160 -0.083 0.086"
+              size="0.005"
+              rgba="0.15 0.30 0.95 1"
+              contype="0" conaffinity="0" density="0"/>
+
+        <!-- visual axle tubes -->
+        <geom name="front_axle_vis" type="capsule"
+              fromto="0.1905 -0.130 -0.080   0.1905 0.130 -0.080"
+              size="0.012"
+              rgba="0.08 0.08 0.08 1"
+              contype="0" conaffinity="0" density="0"/>
+
+        <geom name="rear_axle_vis" type="capsule"
+              fromto="-0.1905 -0.130 -0.080  -0.1905 0.130 -0.080"
+              size="0.012"
+              rgba="0.08 0.08 0.08 1"
+              contype="0" conaffinity="0" density="0"/>
+
+        <!-- =========================================================
+             WHEELS
+             wheelbase = 0.381 -> x = ±0.1905
+             overall width = 0.411
+             tire half-width = 0.051 -> wheel center y = ±0.1545
+             tire radius = 0.089
+             ========================================================= -->
+        <body name="wheel_fl" pos=" 0.1905  0.1545 -0.080">
+          <joint name="j_fl" type="hinge" axis="0 1 0" damping="0.002"/>
+          <geom name="tire_fl" type="cylinder"
+                size="0.089 0.051"
+                euler="1.5708 0 0"
+                rgba="0.08 0.08 0.08 1"
+                mass="0.425"
+                friction="2.01 0.005 0.0002"/>
+          <geom name="rim_fl" type="cylinder"
+                size="0.052 0.037"
+                euler="1.5708 0 0"
+                rgba="0.20 0.35 0.95 1"
+                contype="0" conaffinity="0" density="0"/>
+          <geom name="hub_fl" type="sphere"
+                size="0.015"
+                rgba="0.85 0.85 0.88 1"
+                contype="0" conaffinity="0" density="0"/>
+          <geom name="mark_fl" type="sphere" size="0.02" pos="0.01 0.05 0.04"
+                rgba="1 1 1 1" contype="0" conaffinity="0" density="0"/>
+        </body>
+
+        <body name="wheel_fr" pos=" 0.1905 -0.1545 -0.080">
+          <joint name="j_fr" type="hinge" axis="0 1 0" damping="0.002"/>
+          <geom name="tire_fr" type="cylinder"
+                size="0.089 0.051"
+                euler="1.5708 0 0"
+                rgba="0.08 0.08 0.08 1"
+                mass="0.425"
+                friction="2.01 0.005 0.0002"/>
+          <geom name="rim_fr" type="cylinder"
+                size="0.052 0.037"
+                euler="1.5708 0 0"
+                rgba="0.20 0.35 0.95 1"
+                contype="0" conaffinity="0" density="0"/>
+          <geom name="hub_fr" type="sphere"
+                size="0.015"
+                rgba="0.85 0.85 0.88 1"
+                contype="0" conaffinity="0" density="0"/>
+          <geom name="mark_fr" type="sphere" size="0.02" pos="0.01 -0.05 0.04"
+                rgba="1 1 1 1" contype="0" conaffinity="0" density="0"/>
+        </body>
+
+        <body name="wheel_rl" pos="-0.1905  0.1545 -0.080">
+          <joint name="j_rl" type="hinge" axis="0 1 0" damping="0.002"/>
+          <geom name="tire_rl" type="cylinder"
+                size="0.089 0.051"
+                euler="1.5708 0 0"
+                rgba="0.08 0.08 0.08 1"
+                mass="0.425"
+                friction="2.01 0.005 0.0002"/>
+          <geom name="rim_rl" type="cylinder"
+                size="0.052 0.037"
+                euler="1.5708 0 0"
+                rgba="0.20 0.35 0.95 1"
+                contype="0" conaffinity="0" density="0"/>
+          <geom name="hub_rl" type="sphere"
+                size="0.015"
+                rgba="0.85 0.85 0.88 1"
+                contype="0" conaffinity="0" density="0"/>
+          <geom name="mark_rl" type="sphere" size="0.02" pos="0.01 0.05 0.04"
+                rgba="1 1 1 1" contype="0" conaffinity="0" density="0"/>
+        </body>
+
+        <body name="wheel_rr" pos="-0.1905 -0.1545 -0.080">
+          <joint name="j_rr" type="hinge" axis="0 1 0" damping="0.002"/>
+          <geom name="tire_rr" type="cylinder"
+                size="0.089 0.051"
+                euler="1.5708 0 0"
+                rgba="0.08 0.08 0.08 1"
+                mass="0.425"
+                friction="2.01 0.005 0.0002"/>
+          <geom name="rim_rr" type="cylinder"
+                size="0.052 0.037"
+                euler="1.5708 0 0"
+                rgba="0.20 0.35 0.95 1"
+                contype="0" conaffinity="0" density="0"/>
+          <geom name="hub_rr" type="sphere"
+                size="0.015"
+                rgba="1 1 1 1"
+                contype="0" conaffinity="0" density="0"/>
+          <geom name="mark_rr" type="sphere" size="0.02" pos="0.01 -0.05 0.04"
+                rgba="1 1 1 1" contype="0" conaffinity="0" density="0"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <tendon>
+    <fixed name="drive">
+      <joint joint="j_fl" coef="0.25"/>
+      <joint joint="j_fr" coef="0.25"/>
+      <joint joint="j_rl" coef="0.25"/>
+      <joint joint="j_rr" coef="0.25"/>
+    </fixed>
+  </tendon>
+
+  <actuator>
+    <motor name="drive_motor"
+            tendon="drive"
+            ctrllimited="true"
+            ctrlrange="-45.0 45.0"
+            gear="1.0"/>
+  </actuator>
+
+  <sensor>
+      <accelerometer name="imu_acc"  site="imu_site"/>
+      <gyro          name="imu_gyro" site="imu_site"/>
+      <velocimeter   name="imu_vel"  site="imu_site"/>
+      <framequat     name="imu_quat" objtype="site" objname="imu_site"/>
+  </sensor>
+</mujoco>
