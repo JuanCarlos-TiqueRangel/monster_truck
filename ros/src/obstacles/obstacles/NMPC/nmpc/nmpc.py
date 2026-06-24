@@ -36,6 +36,9 @@ class NMPC:
         self.d = len(gp_cfg.lengthscales)           # GP feature dim (= 5: x,theta,omega,v,tau)
         self.gp_l = np.asarray(gp_cfg.lengthscales, dtype=float)
         self.last_solution = None
+        # GP-discovered pre-wheelie target angle [rad]; a runtime param so an episodic learner
+        # can change it each episode WITHOUT rebuilding the solver. 0 -> no pre-wheelie (flat ref).
+        self.theta_obs = math.radians(cfg.theta_obs_deg)
         self._build_solver()
 
     def _f_ca(self, x, u, a_rls, Z, alpha_v_dot, alpha_omega_dot):
@@ -90,9 +93,9 @@ class NMPC:
         U = ca.SX.sym("U", self.nu, N)
 
         # Parameter vector:
-        #   state(4) ref(4) tau_prev(1) a_rls(n_rls=10) | Z(M*d) alpha_v_dot(M) alpha_omega_dot(M)
+        #   state(4) ref(4) tau_prev(1) a_rls(n_rls=10) | Z(M*d) alpha_v_dot(M) alpha_omega_dot(M) | theta_obs(1)
         n_base = 9 + self.n_rls
-        P = ca.SX.sym("P", n_base + M * d + 2 * M)
+        P = ca.SX.sym("P", n_base + M * d + 2 * M + 1)
 
         x0 = P[0:4]
         ref = P[4:8]
@@ -101,13 +104,13 @@ class NMPC:
         a_rls = P[i:i + self.n_rls];            i += self.n_rls
         Z = ca.reshape(P[i:i + M * d], M, d);   i += M * d
         alpha_v_dot = P[i:i + M];                   i += M
-        alpha_omega_dot = P[i:i + M]
+        alpha_omega_dot = P[i:i + M];                i += M
+        theta_obs_p = P[i]    # runtime pre-wheelie target angle [rad] -- learner sets it per episode
 
         obj = 0
         g = []
         g.append(X[:, 0] - x0)
 
-        Q = ca.diag(ca.vertcat(cfg.q_x, cfg.q_v, cfg.q_theta, cfg.q_omega))
         Qf = ca.diag(ca.vertcat(cfg.q_x, cfg.q_v, cfg.q_terminal_theta, cfg.q_terminal_omega))
 
         # Smooth flip penalty. The goal-reaching cost makes the truck want forward
@@ -141,7 +144,20 @@ class NMPC:
             else:
                 du = uk[0] - U[0, k - 1]
 
-            obj += ca.mtimes([e.T, Q, e])
+            # GP-DISCOVERED pre-wheelie: where the GP predicts a blockage ahead at the PREDICTED
+            # state (xk[0], xk[2]), steer the PITCH REFERENCE to theta_obs_p (a runtime param the
+            # episodic learner sets) so the truck rears to a CONTROLLED climb angle and holds it
+            # (q_theta tracks the ref). The obstacle location is LEARNED by the GP, never hardcoded.
+            z = ca.vertcat(xk[0], xk[2])
+            bl = casadi_gp_mean(z, Z, alpha_v_dot, self.gp_l, self.gp_cfg.sf2)       # v_dot resid
+            gate = 0.5 * (1.0 + ca.tanh((-bl - cfg.obs_block) / cfg.obs_block_w))    # ~1 where blocked
+            theta_ref = theta_obs_p * gate
+            obj += (cfg.q_x * e[0] ** 2 + cfg.q_v * e[1] ** 2
+                    + cfg.q_theta * (xk[2] - theta_ref) ** 2 + cfg.q_omega * e[3] ** 2)
+            # MBRL reward term: maximise forward progress (-> minimise time). The planner
+            # trades this against the obstacle deceleration the SSGP predicts, so it discovers
+            # the speed-maximising maneuver (a wheelie at the obstacle) on its own.
+            obj += -cfg.w_progress * xk[1]
             obj += cfg.r_tau * uk[0] ** 2
             obj += cfg.r_dtau * du ** 2
             obj += flip_pen(xk) + flipw_pen(xk)
@@ -228,6 +244,7 @@ class NMPC:
             np.array([tau_prev], dtype=float),
             np.asarray(a_rls, dtype=float).reshape(-1),
             np.asarray(gp_params, dtype=float).reshape(-1),
+            np.array([self.theta_obs], dtype=float),
         ])
 
         x_init = self._initial_guess(np.asarray(state, dtype=float), tau_prev)

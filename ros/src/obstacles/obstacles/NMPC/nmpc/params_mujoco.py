@@ -53,3 +53,17 @@ class MPCConfig:
     theta_soft_deg: float = 80.0
     q_flipw: float = 0.0
     theta_climb_deg: float = 55.0
+
+    # MBRL REWARD: maximise forward PROGRESS (= minimise time). w_progress rewards forward
+    # speed at every horizon step; the planner optimises this return against the LEARNED SSGP
+    # model, so -- because the model knows rearing reduces the obstacle blockage -- the wheelie
+    # EMERGES where it pays off, with no hand-set angle/location. 0 = off (pure regulation cost).
+    w_progress: float = 0.0
+
+    # GP-DISCOVERED pre-wheelie: wherever the GP predicts a blockage > obs_block [m/s^2] along
+    # the horizon, steer the PITCH REFERENCE to theta_obs_deg so the truck rears to a CONTROLLED
+    # climb angle (and holds it, since q_theta still tracks the reference) instead of either
+    # ramming flat or rearing freely into a flip. NO hardcoded location. 0 = off (flat ref).
+    theta_obs_deg: float = 0.0
+    obs_block: float = 8.0
+    obs_block_w: float = 2.5

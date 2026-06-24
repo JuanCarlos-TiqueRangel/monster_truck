@@ -1,0 +1,406 @@
+{
+  "best_angle": 2.0,
+  "best_time": 2.0589999999998843,
+  "history": [
+    {
+      "angle": 0.0,
+      "t_cross": 1.314999999999966,
+      "max_pitch": 148.77467371080542,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 118.38269400863138,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 5.3999999999999995,
+      "t_cross": 20.0,
+      "max_pitch": 23.121751245316254,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 48.05511745931634,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 2.0,
+      "t_cross": 20.0,
+      "max_pitch": 48.69444385467939,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 73.27972849274819,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 2.0,
+      "t_cross": 20.0,
+      "max_pitch": 78.60747179495674,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 13.019965181166345,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 2.0,
+      "t_cross": 20.0,
+      "max_pitch": 14.978434921787857,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 44.755712260788584,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 2.0,
+      "t_cross": 20.0,
+      "max_pitch": 23.323607673974433,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 36.47131608169112,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 2.0,
+      "t_cross": 20.0,
+      "max_pitch": 65.18878065272102,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 7.3610889004487206,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 2.0,
+      "t_cross": 20.0,
+      "max_pitch": 6.453001104338139,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 6.497010012311504,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 2.0,
+      "t_cross": 20.0,
+      "max_pitch": 7.877526499647246,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 4.848834263264117,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 2.0,
+      "t_cross": 20.0,
+      "max_pitch": 55.35969698156329,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 58.032550720687226,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 2.0,
+      "t_cross": 20.0,
+      "max_pitch": 10.953774309723903,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 17.672357105391445,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 2.0,
+      "t_cross": 20.0,
+      "max_pitch": 7.712435071035283,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 7.743253916873504,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 2.0,
+      "t_cross": 20.0,
+      "max_pitch": 7.054619649176731,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 6.939779524564894,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 2.0,
+      "t_cross": 20.0,
+      "max_pitch": 6.434296085667401,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 10.609495627662884,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 2.0,
+      "t_cross": 20.0,
+      "max_pitch": 10.121569736155028,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 10.367797986942817,
+      "safe": false,
+      "best_angle": 0.0,
+      "best_time": Infinity
+    },
+    {
+      "angle": 2.0,
+      "t_cross": 2.0589999999998843,
+      "max_pitch": 50.08065471113025,
+      "safe": true,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 4.0,
+      "t_cross": 20.0,
+      "max_pitch": 5.602048359991538,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 11.988899891663932,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 4.0,
+      "t_cross": 20.0,
+      "max_pitch": 10.44537816940587,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 16.08055356422614,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 4.0,
+      "t_cross": 20.0,
+      "max_pitch": 101.09026526020709,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 87.64458895165552,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 4.0,
+      "t_cross": 20.0,
+      "max_pitch": 5.676389818927024,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 5.864193142011823,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 4.0,
+      "t_cross": 20.0,
+      "max_pitch": 5.826384089444634,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 5.89066233684872,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 4.0,
+      "t_cross": 20.0,
+      "max_pitch": 5.65077885847852,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 7.88912369782428,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 4.0,
+      "t_cross": 20.0,
+      "max_pitch": 8.59810170865639,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 6.320292099178255,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 4.0,
+      "t_cross": 20.0,
+      "max_pitch": 7.102547155510856,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 8.25838310603996,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 4.0,
+      "t_cross": 20.0,
+      "max_pitch": 6.96432236707675,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 0.0,
+      "t_cross": 20.0,
+      "max_pitch": 8.703819964115448,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    },
+    {
+      "angle": 4.0,
+      "t_cross": 20.0,
+      "max_pitch": 8.172467588955282,
+      "safe": false,
+      "best_angle": 2.0,
+      "best_time": 2.0589999999998843
+    }
+  ]
+}
