@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-
 import sys
 import time
 import math
@@ -34,7 +33,12 @@ RENDER   = False      # True = watch the truck; False = fast headless run
 CTRL_DT  = 0.05      # control / RLS period [s]
 INIT_Z   = 0.1512    # spawn height
 
+# GP settings
+LOAD_MODEL = False
+GP_ENABLED = True
+
 # RLS settings
+RLS_FREEZE = True
 FORGETTING_FACTOR = 0.999    # < 1 keeps the fit adaptive
 INITIAL_COVARIANCE = 5.0     # prior uncertainty on the weights
 SIGMA_V_DOT = 2.0            # measurement-noise std, v_dot channel
