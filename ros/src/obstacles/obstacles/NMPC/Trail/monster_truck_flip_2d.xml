@@ -28,11 +28,11 @@
             friction="5.01 0.01 0.0005"/> -->
 
       <!-- Bigger obstacles single box-->
-      <geom name="obs_box_2" type="box"
+      <!-- <geom name="obs_box_2" type="box"
             pos="2.0 0.0 0.1"
             size="0.30 0.30 0.1"
             rgba="0.2 0.2 0.8 1"
-            friction="5.01 0.01 0.0005"/>
+            friction="5.01 0.01 0.0005"/> -->
 
 
       <!-- obstacles rounded cilinders-->
@@ -453,7 +453,7 @@
         <body name="wheel_fl" pos=" 0.1905  0.1545 -0.080">
           <joint name="j_fl" type="hinge" axis="0 1 0" damping="0.002"/>
           <geom name="tire_fl" type="cylinder"
-                size="0.089 0.051"
+                size="0.081 0.051"
                 euler="1.5708 0 0"
                 rgba="0.08 0.08 0.08 1"
                 mass="0.425"
@@ -474,7 +474,7 @@
         <body name="wheel_fr" pos=" 0.1905 -0.1545 -0.080">
           <joint name="j_fr" type="hinge" axis="0 1 0" damping="0.002"/>
           <geom name="tire_fr" type="cylinder"
-                size="0.089 0.051"
+                size="0.081 0.051"
                 euler="1.5708 0 0"
                 rgba="0.08 0.08 0.08 1"
                 mass="0.425"
@@ -495,7 +495,7 @@
         <body name="wheel_rl" pos="-0.1905  0.1545 -0.080">
           <joint name="j_rl" type="hinge" axis="0 1 0" damping="0.002"/>
           <geom name="tire_rl" type="cylinder"
-                size="0.089 0.051"
+                size="0.081 0.051"
                 euler="1.5708 0 0"
                 rgba="0.08 0.08 0.08 1"
                 mass="0.425"
@@ -516,7 +516,7 @@
         <body name="wheel_rr" pos="-0.1905 -0.1545 -0.080">
           <joint name="j_rr" type="hinge" axis="0 1 0" damping="0.002"/>
           <geom name="tire_rr" type="cylinder"
-                size="0.089 0.051"
+                size="0.081 0.051"
                 euler="1.5708 0 0"
                 rgba="0.08 0.08 0.08 1"
                 mass="0.425"
@@ -546,11 +546,12 @@
     </fixed>
   </tendon>
 
+  <!-- max peak 8.3Nm -->
   <actuator>
-    <motor name="drive_motor"
+      <motor name="drive_motor"
             tendon="drive"
             ctrllimited="true"
-            ctrlrange="-45.0 45.0"
+            ctrlrange="-7.0 7.0"
             gear="1.0"/>
   </actuator>
 

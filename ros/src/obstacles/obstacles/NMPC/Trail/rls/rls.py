@@ -1,49 +1,59 @@
 import numpy as np
 
 
+def nominal_rls_parameters(p=None) -> np.ndarray:
+    return np.array(
+        [
+            # v_dot = b_tau*tau + b_v*v + b_quad*|v|v + b_tau_theta*tau*cos(theta) + b_0
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+
+            # omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+
+        ],
+        dtype=float,
+    )
+
+
+
 # def nominal_rls_parameters(p=None) -> np.ndarray:
 
 #     return np.array(
 #         [
 #             # v_dot = b_tau*tau + b_v*v + b_quad*|v|v + b_tau_theta*tau*cos(theta) + b_0
-#             0.0,
-#             0.0,
-#             0.0,
-#             0.0,
-#             0.0,
+#             0.33576494835613013, 
+#             0.15384947727685389, 
+#             -0.007987928670295406, 
+#             0.3450078073384131,
+#             0.1883022253612322,
 
 #             # omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0
-#             0.0,
-#             0.0,
-#             0.0,
-#             0.0,
-#             0.0,
+#             -0.3113783114905365,
+#             -0.5357018617346715, 
+#             0.7215481468154723, 
+#             0.26238113998184925, 
+#             1.100909819494227
 #         ],
 #         dtype=float,
 #     )
-
-
-
-def nominal_rls_parameters(p=None) -> np.ndarray:
-
-    return np.array(
-        [
-            # v_dot = b_tau*tau + b_v*v + b_quad*|v|v + b_tau_theta*tau*cos(theta) + b_0
-            0.5797325887864817,
-            -0.052103921404089176, 
-            -0.002319556678023478, 
-            0.4888750173164126, 
-            0.04229290897515063,
-
-            # omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0
-            0.8252933830564172, 
-            -0.5537942257289579, 
-            1.4961818961972944, 
-            0.19807363839226516, 
-            -0.3025026481143033
-        ],
-        dtype=float,
-    )
 
 
 # def nominal_rls_parameters(p=None) -> np.ndarray:
@@ -94,6 +104,7 @@ def rls_update(
     _, v_next, _, omega_next = state_next
 
     # 1) Acceleration target (raw -- no filtering).
+    #y = np.asarray(y_dot_meas, dtype=float).reshape(2).copy()
     if y_dot_meas is not None:
         y = np.asarray(y_dot_meas, dtype=float).reshape(2).copy()
     else:
@@ -106,31 +117,44 @@ def rls_update(
     # 2) Feature vectors.
     phi_v = np.array(
         [
-            tau,                              # drive torque -> forward traction force
-            v_prev,                           # linear (viscous/rolling) drag,  -c_v*v
-            abs(v_prev) * v_prev,             # quadratic aero drag (signed), dominates at speed
-            tau * (np.cos(theta_prev)), # traction roll-off as it rears (0 at flat)
-            1.0,                              # constant bias (absorbs un-modelled offset)
+            tau,                            # drive torque -> forward traction force
+            v_prev,                         # linear (viscous/rolling) drag,  -c_v*v
+            abs(v_prev) * v_prev,           # quadratic aero drag (signed), dominates at speed
+            tau * (np.cos(theta_prev)),     # traction roll-off as it rears (0 at flat)
+            np.tanh(v_prev/0.05),
+            omega_prev ** 2 * np.cos(theta_prev),
+            1.0,                            # constant bias (absorbs un-modelled offset)
         ],
         dtype=float,
     )
 
     phi_w = np.array(
         [
-            np.cos(theta_prev),               # gravity restoring torque (pendulum about pivot)
-            tau,                              # wheel reaction torque that pops the wheelie
-            omega_prev,                       # pitch-rate damping (aero + joint)
-            v_prev,                           # weight-transfer/speed coupling into pitch
-            1.0,                              # constant bias
+            np.cos(theta_prev),             # gravity restoring torque (pendulum about pivot)
+            tau,                            # wheel reaction torque that pops the wheelie
+            omega_prev,                     # pitch-rate damping (aero + joint)
+            v_prev,                         # weight-transfer/speed coupling into pitch
+            abs(omega_prev) * omega_prev,
+            v_prev * omega_prev,
+            abs(v_prev) * omega_prev,
+            np.cos(theta_prev)*omega_prev,
+            np.sin(theta_prev)*v_prev,
+            np.sin(theta_prev),
+            np.cos(theta_prev)*tau,
+            tau*v_prev,
+            1.0,                            # constant bias
         ],
         dtype=float,
     )
 
+    # shape of the featured-vectors of v_dot
+    v_dot_shape = phi_v.shape[0]
+
     # 3) Block regression matrix H. a = [a_v(5), a_w(5)] -> 10 params.
     n = a.shape[0]
     H = np.zeros((2, n), dtype=float)
-    H[0, 0:5] = phi_v
-    H[1, 5:n] = phi_w
+    H[0, 0:v_dot_shape] = phi_v
+    H[1, v_dot_shape:n] = phi_w
 
     # 4) Prediction and error.
     y_hat_before = H @ a

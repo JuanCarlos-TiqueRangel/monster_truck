@@ -82,11 +82,21 @@ class MPPITorch:
             res_v, res_w = self.gp.predict_torch(X)
 
         x_dot = v
-        v_dot = (a[0] * tau + a[1] * v + a[2] * v.abs() * v
-                 + a[3] * tau * (torch.cos(th) - 1.0) + a[4] + res_v)
+        v_dot = (a[0] * tau 
+                 + a[1] * v 
+                 + a[2] * v.abs() * v
+                 + a[3] * tau * (torch.cos(th)) 
+                 + a[4] 
+                 + res_v)
+        
         th_dot = om
-        om_dot = (a[5] * torch.cos(th) + a[6] * tau + a[7] * om
-                  + a[8] * v + a[9] + res_w)
+        
+        om_dot = (a[5] * torch.cos(th) 
+                  + a[6] * tau 
+                  + a[7] * om
+                  + a[8] * v 
+                  + a[9] 
+                  + res_w)
         return torch.stack([x_dot, v_dot, th_dot, om_dot], dim=-1)
 
     def _step(self, s, tau, a, dt):
