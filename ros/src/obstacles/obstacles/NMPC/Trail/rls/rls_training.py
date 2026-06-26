@@ -18,6 +18,7 @@ for _sub in ("mppi", "gp", "rls", "nmpc"):
 
 from params_mppi import WheelieParams
 from rls import rls_update
+# from rls import WEIGHT_NAMES as _WEIGHT_NAMES
 
 
 # ============================================================
@@ -31,31 +32,46 @@ CSV_PATH = Path(__file__).with_name("rls_accel.csv")   # measured vs fit, for co
 
 RENDER   = False      # True = watch the truck; False = fast headless run
 CTRL_DT  = 0.05      # control / RLS period [s]
-INIT_Z   = 0.1512    # spawn height
-
-# GP settings
-LOAD_MODEL = False
-GP_ENABLED = True
+INIT_Z   = 0.1432    # spawn height
 
 # RLS settings
-RLS_FREEZE = True
 FORGETTING_FACTOR = 0.999    # < 1 keeps the fit adaptive
 INITIAL_COVARIANCE = 5.0     # prior uncertainty on the weights
 SIGMA_V_DOT = 2.0            # measurement-noise std, v_dot channel
 SIGMA_OMEGA_DOT = 2.0        # measurement-noise std, omega_dot channel
 
 # Outlier gate: skip a step if the measured accel is bigger than this (contact impact).
-ACCEL_CAP_V = 15.0           # m/s^2
-ACCEL_CAP_W = 30.0           # rad/s^2
+ACCEL_CAP_V = 10.0           # m/s^2
+ACCEL_CAP_W = 200.0           # rad/s^2
 
 # Held-wheelie operating points [deg]. Several distinct angles give several cos(theta)
 # levels, which is what makes the gravity term a_g identifiable.
 HELD_ANGLES = (25.0, 45.0, 60.0, 72.0, -25.0, -45.0, -60.0, -72.0)
 
-# The 10 weight names, in the order rls.py uses them.
-WEIGHT_NAMES = ["b_tau", "b_v", "b_abs_v", "b_tau_cos", "b_0",
-                "a_g", "a_tau", "a_omega", "a_v", "a_0"]
+# The weight names, in the order rls.py uses them.
+WEIGHT_NAMES = ["b_tau", 
+                "b_v", 
+                "b_abs_v", 
+                "b_tau_cos", 
+                "b_tanh", 
+                "b_omega_cos", 
+                "b_0",
 
+                "a_g", 
+                "a_tau", 
+                "a_omega", 
+                "a_v", 
+                "a_absw_w", 
+                "a_v_omega", 
+                "a_absv_w", 
+                "a_cos_omega", 
+                "a_sin_v",
+                "a_sin",
+                "a_cos_v",
+                "a_tau_v",
+                "a_0"]
+
+# WEIGHT_NAMES = _WEIGHT_NAMES
 
 # ============================================================
 # Excitation signals  ->  each is a function tau(t_local, state)
@@ -101,7 +117,7 @@ def hold_wheelie(target_deg):
         error = theta - target
         box["integral"] = float(np.clip(box["integral"] + error * CTRL_DT, -4.0, 4.0))
         dither = 1.2 * math.sin(2 * math.pi * 1.0 * t) + 0.8 * math.sin(2 * math.pi * 2.3 * t)
-        # neg tau rears up, so theta below target (error<0) -> negative torque
+        
         return -2.0 - 3.5 * math.cos(theta) + 16.0 * error + 12.0 * box["integral"] + 2.8 * omega + dither
 
     return signal
@@ -162,11 +178,10 @@ class RLSEstimator:
         self.P = INITIAL_COVARIANCE * np.eye(n)
 
     def update(self, state_prev, tau_prev, state_next, accel_meas, dt):
-        self.a, self.P, info = rls_update(
-            state_prev=state_prev, tau=tau_prev, state_next=state_next, dt=dt,
-            a=self.a, P=self.P, forgetting_factor=FORGETTING_FACTOR,
-            sigma_v_dot=SIGMA_V_DOT, sigma_omega_dot=SIGMA_OMEGA_DOT,
-            y_dot_meas=accel_meas,
+        self.a, self.P, info = rls_update(state_prev=state_prev, tau=tau_prev, state_next=state_next, 
+                                          dt=dt, a=self.a, P=self.P, forgetting_factor=FORGETTING_FACTOR, 
+                                          sigma_v_dot=SIGMA_V_DOT, sigma_omega_dot=SIGMA_OMEGA_DOT, 
+                                          y_dot_meas=accel_meas,
         )
         return info
 
@@ -308,6 +323,11 @@ class RLSTrainingNode:
 
         # --- estimator, logger, schedule ---
         self.p = WheelieParams()
+
+        # keep the torque clip in lock-step with the XML actuator (single source of truth)
+        lo, hi = self.model.actuator_ctrlrange[self.drive]
+        self.p.tau_min, self.p.tau_max = float(lo), float(hi)
+
         self.rls = RLSEstimator()
         self.logger = TrainingLogger()
         self.schedule = build_schedule(self.p)

@@ -40,6 +40,7 @@ axs[1].set_ylabel("\omega_dot (m/s^2)")
 
 
 fig.suptitle("Correlation")
+fig.savefig("rls_correlation.png", dpi=200, bbox_inches="tight")
 #fig.tight_layout()
 
 for ax in axs:

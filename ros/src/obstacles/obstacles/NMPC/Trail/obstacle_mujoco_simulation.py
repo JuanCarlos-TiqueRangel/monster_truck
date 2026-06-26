@@ -49,10 +49,7 @@ N_EPISODES = 50
 LOAD_MODEL = False    # True = RESUME from a saved model (GP posterior + RLS state)
 GP_ENABLED = True     # False = ZERO the GP's contribution (RLS-only control; GP still learns/logs)
 
-# RLS settings. RLS_FREEZE=True holds a_rls at the nominal physics values for the whole
-# run (no online adaptation): the residual y - H@a_nom is the GP's target, so freezing
-# pins the SMOOTH dynamics while the GP maps the obstacle. With the weights frozen the
-# forgetting/covariance/sigma values below do not affect the GP target.
+# RLS settings. RLS_FREEZE=True holds a_rls at the nominal physics values
 RLS_FREEZE = True
 FORGETTING_FACTOR = 0.9995   # < 1 keeps the fit adaptive
 INITIAL_COVARIANCE = 3.0     # prior uncertainty on the weights
@@ -63,9 +60,7 @@ SIGMA_OMEGA_DOT = 5.0        # measurement-noise std, omega_dot channel
 ACCEL_CAP_V = 15.0           # m/s^2
 ACCEL_CAP_W = 30.0           # rad/s^2
 
-# The UNIQUE MPPI reference: reach the goal position GOAL_X. There is NO pitch reference
-# -- a wheelie is only popped if the learned dynamics/GP make rearing the cheapest way
-# to reach the goal (e.g. to climb the obstacle).
+# Controller reference
 GOAL_X = 10.0
 GOAL_TOL = 0.15          # an episode ends early once |x - GOAL_X| < GOAL_TOL
 
@@ -76,7 +71,6 @@ INITIAL_ROOT_PITCH_DEG = 0.0
 # The 10 weight names, in the order rls.py uses them.
 WEIGHT_NAMES = ["b_tau", "b_v", "b_abs_v", "b_tau_cos", "b_0",
                 "a_g", "a_tau", "a_omega", "a_v", "a_0"]
-
 
 # ============================================================
 # Small helpers
@@ -202,9 +196,6 @@ class ObstacleNode:
 
         # GPyTorch sparse-variational GP residual learner (GP.py). Feature
         # z = [x, v, theta, omega, tau]: the FULL system input. Built ONCE and kept alive
-        # across episodes so episode 2 starts with episode 1's obstacle knowledge.
-        # BUILT FIRST: the torch MPPI HOLDS this gp object and calls gp.predict_torch()
-        # directly, so it must receive the built gp -- not gp_cfg.
         self.gp_cfg = SSGPConfig()
         self.gp = self.gp_cfg.build()
         self.nmpc = MPPI(self.p, self.cfg, self.gp, integrator="rk4")
@@ -250,7 +241,6 @@ class ObstacleNode:
         self.last_state = np.zeros(4)     # most recent IMU controller state [x,v,theta,omega]
 
     # --- MuJoCo address helpers ---
-
     def _joint(self, name):
         jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
         if jid < 0:
@@ -310,12 +300,10 @@ class ObstacleNode:
         return float(self.data.qpos[self.x_q]), float(self.data.qvel[self.x_v])
 
     # --- command publisher ---
-
     def publish_command(self, tau):
         self.data.ctrl[self.drive] = tau
 
     # --- plant stepping ---
-
     def reset_episode(self):
         """Reset the MuJoCo state and per-episode bookkeeping. KEEPS the RLS weights and
         the GP posterior -- that learned knowledge is what carries to the next episode."""
@@ -353,12 +341,7 @@ class ObstacleNode:
         return float(self.data.time)
 
     # --- control / run ---
-
     def control_update(self):
-        """One control update at CTRL_DT: read the IMU + odometry, feed the matched residual
-        to the GP, solve the MPPI to the goal, and publish the command. The accel just read
-        is the truck's response to the command already applied (tau_prev), so it is paired
-        with that command in the regressor and as the GP residual target."""
         x, v = self.read_odometry()
         pitch, rate, vdot, wdot = self.read_imu()
         state_now = np.array([x, v, pitch, rate], dtype=float)
@@ -386,9 +369,6 @@ class ObstacleNode:
             # a fixed model and the impulsive omega spikes are smoothed as noise by the fit.
             self.gp.observe(z, self.res_v_dot, self.res_omega_dot)
 
-        # NOTE: mppi_torch.MPPITorch reads the GP through the held gp object, so solve() does
-        # not take gp_params. To swap in numba mppi.MPPI / casadi nmpc.NMPC, pass the CONFIG
-        # at construction and restore the gp_params argument here (see backup for the form).
         tau, info = self.nmpc.solve(state_now, self.ref, self.tau_prev, self.rls.a)
         tau = float(np.clip(tau, self.p.tau_min, self.p.tau_max))
         ctrl = float(np.clip(tau, self.ctrl_min, self.ctrl_max))
