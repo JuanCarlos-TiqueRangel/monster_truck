@@ -338,7 +338,6 @@
 
         <!-- =========================================================
              LOWER SIDE PANELS
-             Keep material around the shell without blocking wheel space.
              ========================================================= -->
         <geom name="left_lower_front" type="box"
               pos="0.105 0.099 0.072"
@@ -445,10 +444,10 @@
 
         <!-- =========================================================
              WHEELS
-             wheelbase = 0.381 -> x = ±0.1905
+             wheelbase = 0.381 -> x = 0.1905
              overall width = 0.411
-             tire half-width = 0.051 -> wheel center y = ±0.1545
-             tire radius = 0.089
+             tire half-width = 0.051  wheel center y = 0.1545
+             tire radius = 0.081
              ========================================================= -->
         <body name="wheel_fl" pos=" 0.1905  0.1545 -0.080">
           <joint name="j_fl" type="hinge" axis="0 1 0" damping="0.002"/>
@@ -551,7 +550,7 @@
       <motor name="drive_motor"
             tendon="drive"
             ctrllimited="true"
-            ctrlrange="-7.0 7.0"
+            ctrlrange="-8.0 8.0"
             gear="1.0"/>
   </actuator>
 

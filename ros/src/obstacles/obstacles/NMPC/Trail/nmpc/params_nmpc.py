@@ -15,11 +15,11 @@ class WheelieParams:
     g: float = 9.81
     c_v: float = 9.0
 
-    tau_min: float = -6.0
-    tau_max: float = 10.0
+    tau_min: float = -8.0
+    tau_max: float = 8.0
 
-    theta_min: float = math.radians(0.0)
-    theta_max: float = math.radians(100.0)
+    theta_min: float = math.radians(-100.0)
+    theta_max: float = math.radians(0.0)
 
     omega_min: float = -8.0
     omega_max: float = 8.0
@@ -34,7 +34,7 @@ class WheelieParams:
 
 @dataclass
 class MPCConfig:
-    dt: float = 0.05
+    dt: float = 0.1
     N: int = 10
 
     # GOAL-REACHING + emergent-wheelie cost. Strong goal attraction (q_x), NO slow-down penalty

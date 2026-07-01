@@ -1,33 +1,4 @@
 #!/usr/bin/env python3
-"""
-================================================================================
-mppi_torch.py  --  a clean, all-torch MPPI (the mppi_core.py pattern)
-================================================================================
-
-This is the "regular controller" version: it just receives the vehicle state,
-rolls a dynamics model forward, scores it with a cost, and returns an action. It
-HOLDS the GP object and calls `gp.predict_torch(X)` DIRECTLY inside the rollout --
-no flat-vector export, no _unpack_gp, no per-kernel closed form. Everything stays
-torch tensors on the GPU, so the model can be called as-is (the whole reason the
-numba mppi.py needs the gp_kernel/mpc_params machinery is that numba can't call torch).
-
-    dynamics:  s' = integrate( RLS_nominal(s,tau; a_rls) + GP_residual(s,tau) )
-    cost:      goal-reaching + control + smooth flip barrier   (matches mppi.py)
-    action:    standard MPPI exponential-weighted update of a warm-started plan
-
-Interface differs from the numba mppi.py ON PURPOSE (it is the point of this file):
-    controller = MPPITorch(p, cfg, gp)                 # holds the GP object
-    tau, info  = controller.solve(state, ref, tau_prev, a_rls)   # NO gp_params
-
-To use it in obstacle_mujoco_simulation.py instead of the numba MPPI:
-    1. build the GP FIRST, then the controller:
-           gp  = gp_cfg.build()
-           nmpc = MPPITorch(p, cfg, gp)
-    2. drop gp_params from the solve call:
-           tau, info = nmpc.solve(state_now, ref, tau_prev, a_rls)
-    (the numba mppi.py is unchanged and still the default.)
-================================================================================
-"""
 
 import math
 import torch
@@ -48,11 +19,7 @@ class MPPITorch:
            fast=False -> calls gp.predict_torch (the GPyTorch model directly), double; the
                          clean-but-slow reference path.
            integrator -> "euler" (1 GP eval/step, default) or "rk4" (4 GP evals/step)."""
-        need = "predict_torch_fast" if fast else "predict_torch"
-        if not hasattr(gp, need):
-            raise TypeError(
-                f"MPPITorch needs the BUILT GP object (with {need}), got {type(gp).__name__}. "
-                "Build it first:  gp = gp_cfg.build();  MPPITorch(p, cfg, gp).")
+
         self.p = p
         self.cfg = cfg
         self.gp = gp                                     # the GP OBJECT (called directly)
@@ -66,14 +33,13 @@ class MPPITorch:
         if self.q_gp_var > 0.0 and not hasattr(gp, "predict_uncertainty_torch"):
             raise TypeError("q_gp_var > 0 needs a GP with predict_uncertainty_torch().")
         self.last_solution = None                        # warm-start plan, (N,) tensor
+        self.plot_hook = None                            # set to a fn(self,s0,U,S,U_opt,a,dt) to live-plot; None = zero overhead
         self.gen = torch.Generator(device=self.device)
         self.gen.manual_seed(self.SEED)
 
     # ---- dynamics: RLS nominal + GP residual (the SAME model as mppi.py) ---
     def _deriv(self, s, tau, a):
-        """State derivative for a BATCH of rollouts. s:(K,4)=[x,v,theta,omega], tau:(K,),
-        a:(10,) RLS weights. The GP residual is added to the RLS nominal accelerations --
-        called directly via gp.predict_torch (the mppi_core.py way)."""
+
         x, v, th, om = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
         X = torch.stack([x, v, th, om, tau], dim=-1)     # (K,5) feature z=[x,v,theta,omega,tau]
         if self.fast:                                    # cached kernel matmul (fast, float32)
@@ -81,22 +47,61 @@ class MPPITorch:
         else:                                            # GPyTorch model forward (slow, double)
             res_v, res_w = self.gp.predict_torch(X)
 
+        # DYNAMIC MODEL
+        # x_dot = v
+        # v_dot = (a[0] * tau + a[1] * v + a[2] * v.abs() * v + a[3] * tau * (torch.cos(th)) + a[4] + res_v)
+        # th_dot = om
+        # om_dot = (a[5] * torch.cos(th) + a[6] * tau + a[7] * om + a[8] * v + a[9] + res_w)
+        
+        # x_dot = v
+        # v_dot = (a[0] * tau
+        #          + a[1] * v 
+        #          + a[2] * v.abs() * v
+        #          + a[3] * tau * (torch.cos(th))
+        #          + a[4] * torch.tanh(v/0.05)
+        #          + a[5] * om**2 * (torch.cos(th))
+        #          + a[6] 
+        #          + res_v)
+        
+        # th_dot = om
+        
+        # om_dot = (a[7] * torch.cos(th) 
+        #           + a[8] * tau 
+        #           + a[9] * om
+        #           + a[10] * v 
+        #           + a[11] * abs(om) * om
+        #           + a[12] * v * om
+        #           + a[13] * abs(v) * om
+        #           + a[14] * torch.cos(th) * om
+        #           + a[15] * torch.sin(th) * v
+        #           + a[16] * torch.sin(th)
+        #           + a[17] * torch.cos(th) * tau
+        #           + a[18] * tau * v
+        #           + a[19]
+        #           + res_w) 
+
+        # x_dot = v
+
+        # v_dot = (a[0] * tau
+        #          + a[1] * v 
+        #          + a[2] * tau * (torch.cos(th))
+        #          + a[3] 
+        #          + res_v)
+        
+        # th_dot = om
+        
+        # om_dot = (a[4] * torch.cos(th) 
+        #           + a[5] * tau 
+        #           + a[6] * om
+        #           + a[7] * v 
+        #           + a[8]
+        #           + res_w) 
+
         x_dot = v
-        v_dot = (a[0] * tau 
-                 + a[1] * v 
-                 + a[2] * v.abs() * v
-                 + a[3] * tau * (torch.cos(th)) 
-                 + a[4] 
-                 + res_v)
-        
+        v_dot = tau/(5.1 * 0.081) + res_v
         th_dot = om
-        
-        om_dot = (a[5] * torch.cos(th) 
-                  + a[6] * tau 
-                  + a[7] * om
-                  + a[8] * v 
-                  + a[9] 
-                  + res_w)
+        om_dot = ((-tau + 5.1*9.81*0.2*torch.cos(th))/((1.0 / 12.0) * 5.1 * (0.53**2 + 0.30**2))) + res_w
+
         return torch.stack([x_dot, v_dot, th_dot, om_dot], dim=-1)
 
     def _step(self, s, tau, a, dt):
@@ -155,10 +160,12 @@ class MPPITorch:
         cost_wall = torch.where(theta.abs() > c["th_max"],
                                 torch.full_like(theta, 1e4), torch.zeros_like(theta))  # theta_max
 
-        # return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate + cost_torque)
+        #return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate + cost_torque)
 
-        return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate + cost_torque
-                + cost_smooth + cost_flip + cost_climb + cost_wall)
+        return cost_goal + cost_pitch*100
+
+        # return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate + cost_torque
+        #         + cost_smooth + cost_flip + cost_climb + cost_wall)
 
     # ------------------------------------------------------------------ #
     # Risk term (optional, weight q_gp_var): penalize planning into states the GP has
@@ -218,6 +225,7 @@ class MPPITorch:
 
         U_opt = torch.clamp(U_nom + (w.unsqueeze(1) * eps).sum(0), tau_min, tau_max)
         self.last_solution = U_opt
+        if self.plot_hook is not None: self.plot_hook(self, s0, U, S, U_opt, a, dt)  # live plot only if a hook is set
         return float(U_opt[0].item()), {"success": True, "cost": float(rho.item())}
 
     def _warm_start(self, N, tau_prev):
