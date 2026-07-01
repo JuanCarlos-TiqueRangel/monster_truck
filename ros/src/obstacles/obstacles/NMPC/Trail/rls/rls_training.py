@@ -31,7 +31,7 @@ NPZ_PATH = Path(__file__).with_name("rls_trained.npz")
 CSV_PATH = Path(__file__).with_name("rls_accel.csv")   # measured vs fit, for correlation_plot.py
 
 RENDER   = False      # True = watch the truck; False = fast headless run
-CTRL_DT  = 0.05      # control / RLS period [s]
+CTRL_DT  = 0.07      # control / RLS period [s]
 INIT_Z   = 0.1432    # spawn height
 
 # RLS settings
@@ -41,12 +41,13 @@ SIGMA_V_DOT = 2.0            # measurement-noise std, v_dot channel
 SIGMA_OMEGA_DOT = 2.0        # measurement-noise std, omega_dot channel
 
 # Outlier gate: skip a step if the measured accel is bigger than this (contact impact).
-ACCEL_CAP_V = 10.0           # m/s^2
+ACCEL_CAP_V = 15.0           # m/s^2
 ACCEL_CAP_W = 200.0           # rad/s^2
 
 # Held-wheelie operating points [deg]. Several distinct angles give several cos(theta)
 # levels, which is what makes the gravity term a_g identifiable.
 HELD_ANGLES = (25.0, 45.0, 60.0, 72.0, -25.0, -45.0, -60.0, -72.0)
+# HELD_ANGLES = (-25.0, -45.0, -60.0, -72.0)
 
 # The weight names, in the order rls.py uses them.
 WEIGHT_NAMES = ["b_tau", 
@@ -70,6 +71,17 @@ WEIGHT_NAMES = ["b_tau",
                 "a_cos_v",
                 "a_tau_v",
                 "a_0"]
+
+# WEIGHT_NAMES = ["b_tau", 
+#                 "b_v", 
+#                 "b_tau_cos", 
+#                 "b_0",
+
+#                 "a_g", 
+#                 "a_tau", 
+#                 "a_omega", 
+#                 "a_v", 
+#                 "a_0"]
 
 # WEIGHT_NAMES = _WEIGHT_NAMES
 
@@ -159,7 +171,7 @@ def build_schedule(p):
     for angle in HELD_ANGLES:
         schedule.append(Phase(f"hold wheelie {angle:.0f}deg", 4.5, hold_wheelie(angle), True))
     schedule += [
-        Phase("PRBS",           3.5, prbs(5.0, 0.30),                                   True),
+        Phase("PRBS",           10.5, prbs(5.0, 0.30),                                   True),
         Phase("backward flip",  1.6, constant(p.tau_min),                              True),
         Phase("settle",         0.6, constant(0.0),                                     False),
         Phase("forward flip",   1.3, constant(p.tau_max),                              True),

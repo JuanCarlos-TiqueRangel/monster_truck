@@ -1,59 +1,120 @@
 import numpy as np
 
 
-def nominal_rls_parameters(p=None) -> np.ndarray:
-    return np.array(
-        [
-            # v_dot = b_tau*tau + b_v*v + b_quad*|v|v + b_tau_theta*tau*cos(theta) + b_0
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
+    # phi_v = np.array(
+    #     [
+    #         tau,                            # drive torque -> forward traction force
+    #         v_prev,                         # linear (viscous/rolling) drag,  -c_v*v
+    #         tau * (np.cos(theta_prev)),     # traction roll-off as it rears (0 at flat)
+    #         1.0,                            # constant bias (absorbs un-modelled offset)
+    #     ],
+    #     dtype=float,
+    # )
 
-            # omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
+    # phi_w = np.array(
+    #     [
+    #         np.cos(theta_prev),             # gravity restoring torque (pendulum about pivot)
+    #         tau,                            # wheel reaction torque that pops the wheelie
+    #         omega_prev,                     # pitch-rate damping (aero + joint)
+    #         v_prev,                         # weight-transfer/speed coupling into pitch
+    #         1.0,                            # constant bias
+    #     ],
+    #     dtype=float,
+    # )
 
-        ],
-        dtype=float,
-    )
+    # phi_v = np.array(
+    #     [
+    #         tau,                            # drive torque -> forward traction force
+    #         v_prev,                         # linear (viscous/rolling) drag,  -c_v*v
+    #         abs(v_prev) * v_prev,           # quadratic aero drag (signed), dominates at speed
+    #         tau * (np.cos(theta_prev)),     # traction roll-off as it rears (0 at flat)
+    #         np.tanh(v_prev/0.05),
+    #         omega_prev ** 2 * np.cos(theta_prev),
+    #         1.0,                            # constant bias (absorbs un-modelled offset)
+    #     ],
+    #     dtype=float,
+    # )
 
+    # phi_w = np.array(
+    #     [
+    #         np.cos(theta_prev),             # gravity restoring torque (pendulum about pivot)
+    #         tau,                            # wheel reaction torque that pops the wheelie
+    #         omega_prev,                     # pitch-rate damping (aero + joint)
+    #         v_prev,                         # weight-transfer/speed coupling into pitch
+    #         abs(omega_prev) * omega_prev,
+    #         v_prev * omega_prev,
+    #         abs(v_prev) * omega_prev,
+    #         np.cos(theta_prev)*omega_prev,
+    #         np.sin(theta_prev)*v_prev,
+    #         np.sin(theta_prev),
+    #         np.cos(theta_prev)*tau,
+    #         tau*v_prev,
+    #         1.0,                            # constant bias
+    #     ],
+    #     dtype=float,
+    # )
 
 
 # def nominal_rls_parameters(p=None) -> np.ndarray:
-
 #     return np.array(
 #         [
 #             # v_dot = b_tau*tau + b_v*v + b_quad*|v|v + b_tau_theta*tau*cos(theta) + b_0
-#             0.33576494835613013, 
-#             0.15384947727685389, 
-#             -0.007987928670295406, 
-#             0.3450078073384131,
-#             0.1883022253612322,
+#             0.0,
+#             0.0,
+#             0.0,
+#             0.0,
+#             0.0,
+#             0.0,
+#             0.0,
 
 #             # omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0
-#             -0.3113783114905365,
-#             -0.5357018617346715, 
-#             0.7215481468154723, 
-#             0.26238113998184925, 
-#             1.100909819494227
+#             0.0,
+#             0.0,
+#             0.0,
+#             0.0,
+#             0.0,
+#             0.0,
+#             0.0,
+#             0.0,
+#             0.0,
+#             0.0,
+#             0.0,
+#             0.0,
+#             0.0,
+
 #         ],
 #         dtype=float,
 #     )
+
+
+
+def nominal_rls_parameters(p=None) -> np.ndarray:
+
+    return np.array(
+        [
+            0.3565290877790395, 
+            0.0866051334203984, 
+            -0.004251711206779533, 
+            0.4244766179177743, 
+            -0.01821777595880388, 
+            -0.026867760695612596, 
+            -0.076819364666327, 
+            1.368244406441047, 
+            -2.9490965127440494, 
+            18.820831793179384, 
+            0.939550014177579, 
+            -1.7080765969155063, 
+            -0.3122309750692474, 
+            0.5056003152744752, 
+            -2.6886559587568817, 
+            -0.09632685061370917, 
+            -6.251492044433644, 
+            -0.1653276663156806, 
+            -0.02304765037065142, 
+            -0.263112676800968
+        ],
+        dtype=float,
+    )
 
 
 # def nominal_rls_parameters(p=None) -> np.ndarray:

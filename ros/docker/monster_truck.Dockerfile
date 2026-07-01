@@ -11,6 +11,7 @@ ENV XLA_PYTHON_CLIENT_PREALLOCATE=false
 # --- system deps for pip + MuJoCo rendering on Ubuntu 24.04 ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
+    python3.12-venv \
     nano \
     libglfw3 \
     libglew2.2 \

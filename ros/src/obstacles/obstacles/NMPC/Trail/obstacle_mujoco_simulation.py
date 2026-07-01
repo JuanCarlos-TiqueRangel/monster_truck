@@ -18,10 +18,24 @@ for _sub in ("mppi", "gp", "rls", "nmpc"):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from params_mppi import WheelieParams, MPPIConfig
+# ---- Controller selection -------------------------------------------------------
+# Set CONTROLLER = "mppi" for the GPU MPPI (mppi_torch.MPPITorch) or "nmpc" for the
+# casadi/IPOPT NMPC (nmpc.NMPC). This one switch drives everything below: the imports,
+# the config class, how the controller is built, and how solve() is called. Only the
+# selected controller's deps are imported (torch for mppi, casadi for nmpc).
+CONTROLLER = "mppi"          # "nmpc" or "mppi"
+
+if CONTROLLER == "mppi":
+    from params_mppi import WheelieParams, MPPIConfig as ControllerConfig
+    from mppi_torch import MPPITorch as Controller
+elif CONTROLLER == "nmpc":
+    from params_nmpc import WheelieParams, MPCConfig as ControllerConfig
+    from nmpc import NMPC as Controller
+else:
+    raise ValueError(f"CONTROLLER must be 'mppi' or 'nmpc', got {CONTROLLER!r}")
+
 from rls import nominal_rls_parameters, rls_update
-from mppi_torch import MPPITorch as MPPI
-from GP import GPConfig as SSGPConfig   # GPyTorch sparse GP residual model that drives the MPPI
+from GP import GPConfig as SSGPConfig   # GPyTorch sparse GP residual model (shared by both)
 
 
 # ============================================================
@@ -35,7 +49,7 @@ RESULTS_DIR.mkdir(exist_ok=True)
 CSV_PATH = RESULTS_DIR / "obstacle_mujoco.csv"
 MODEL_PATH = RESULTS_DIR / "obstacle_model.npz"
 
-RENDER   = False       # True = watch the truck; False = fast headless run
+RENDER   = True       # True = watch the truck; False = fast headless run
 CTRL_DT  = 0.05       # control / MPPI period [s]
 INIT_Z   = 0.1512     # spawn height
 SIM_TIME = 20.0       # per-episode time cap [s]
@@ -49,6 +63,8 @@ N_EPISODES = 50
 LOAD_MODEL = False    # True = RESUME from a saved model (GP posterior + RLS state)
 GP_ENABLED = True     # False = ZERO the GP's contribution (RLS-only control; GP still learns/logs)
 
+LIVE_PLOT = True          # True = live X-vs-theta plot of the MPPI plan while the sim runs
+
 # RLS settings. RLS_FREEZE=True holds a_rls at the nominal physics values
 RLS_FREEZE = True
 FORGETTING_FACTOR = 0.9995   # < 1 keeps the fit adaptive
@@ -58,7 +74,7 @@ SIGMA_OMEGA_DOT = 5.0        # measurement-noise std, omega_dot channel
 
 # Outlier gate: skip a step if the measured accel is bigger than this (contact impact).
 ACCEL_CAP_V = 15.0           # m/s^2
-ACCEL_CAP_W = 30.0           # rad/s^2
+ACCEL_CAP_W = 200.0           # rad/s^2
 
 # Controller reference
 GOAL_X = 10.0
@@ -69,8 +85,44 @@ INITIAL_Z = INIT_Z
 INITIAL_ROOT_PITCH_DEG = 0.0
 
 # The 10 weight names, in the order rls.py uses them.
-WEIGHT_NAMES = ["b_tau", "b_v", "b_abs_v", "b_tau_cos", "b_0",
-                "a_g", "a_tau", "a_omega", "a_v", "a_0"]
+# WEIGHT_NAMES = ["b_tau", "b_v", "b_abs_v", "b_tau_cos", "b_tan", "b_w2_cos", "b_0",
+#                 "a_g", "a_tau", "a_omega", "a_v", 
+#                 "a_abs_omega", "a_v_omega", "a_absV_omega",
+#                 "a_cos_omega", "a_sin_v", "a_sin", "a_cos_tau", "a_tau_v",
+#                 "a_0"]
+
+# WEIGHT_NAMES = ["b_tau", 
+#                 "b_v", 
+#                 "b_tau_cos", 
+#                 "b_0",
+
+#                 "a_g", 
+#                 "a_tau", 
+#                 "a_omega", 
+#                 "a_v", 
+#                 "a_0"]
+
+WEIGHT_NAMES = ["b_tau", 
+                "b_v", 
+                "b_abs_v", 
+                "b_tau_cos", 
+                "b_tanh", 
+                "b_omega_cos", 
+                "b_0",
+
+                "a_g", 
+                "a_tau", 
+                "a_omega", 
+                "a_v", 
+                "a_absw_w", 
+                "a_v_omega", 
+                "a_absv_w", 
+                "a_cos_omega", 
+                "a_sin_v",
+                "a_sin",
+                "a_cos_v",
+                "a_tau_v",
+                "a_0"]
 
 # ============================================================
 # Small helpers
@@ -87,6 +139,74 @@ def empty_rls_info() -> dict:
         "v_dot_error": 0.0,
         "omega_dot_error": 0.0,
     }
+
+
+# ============================================================
+# Live MPPI trajectory plot (X vs theta)
+# ============================================================
+
+
+def plot_mppi_xtheta(mppi, s0, U, S, U_opt, a, dt, n_best=100):
+    """Live X-vs-theta view of what the MPPI is planning at the CURRENT control step. It
+    re-rolls, through the SAME RLS+GP model the controller uses, the `n_best` lowest-cost
+    SAMPLED rollouts (faint grey) and the OPTIMAL control sequence (bold red), and updates a
+    single persistent figure each call. Called once per solve from mppi_torch.solve(); a
+    no-op unless LIVE_PLOT is True, and it disables itself if matplotlib/the display fails
+    (so it is safe to leave in for headless runs)."""
+    if not LIVE_PLOT or plot_mppi_xtheta.__dict__.get("off"):
+        return
+    try:
+        import torch
+        import matplotlib.pyplot as plt
+        N = int(U.shape[1])
+        with torch.no_grad():
+            # n_best lowest-cost sampled rollouts (one batched re-roll)
+            idx = torch.argsort(S)[:n_best]
+            sb = s0.unsqueeze(0).repeat(idx.numel(), 1)
+            xb, tb = [sb[:, 0].clone()], [sb[:, 2].clone()]
+            for n in range(N):
+                sb = mppi._step(sb, U[idx, n], a, dt)
+                xb.append(sb[:, 0].clone()); tb.append(sb[:, 2].clone())
+            xb = torch.stack(xb, 1).cpu().numpy()
+            tb = np.degrees(torch.stack(tb, 1).cpu().numpy())
+            # optimal rollout
+            so = s0.unsqueeze(0)
+            xo, to = [so[:, 0].clone()], [so[:, 2].clone()]
+            for n in range(N):
+                so = mppi._step(so, U_opt[n:n + 1], a, dt)
+                xo.append(so[:, 0].clone()); to.append(so[:, 2].clone())
+            xo = torch.stack(xo, 1).cpu().numpy().ravel()
+            to = np.degrees(torch.stack(to, 1).cpu().numpy().ravel())
+        st = plot_mppi_xtheta                              # persistent state on the function itself
+        if "fig" not in st.__dict__:
+            plt.ion()
+            st.fig, st.ax = plt.subplots()
+            st.ax.set(xlabel="x [m]", ylabel="theta [deg]", xlim=(-2.0, GOAL_X+2), ylim=(-120, 120),
+                      title="MPPI planned trajectories (X vs theta)")
+            st.ax.axvspan(1.7, 2.3, color="0.85", zorder=0)      # obstacle x-span (obs_box_2)
+            st.ax.grid(True, alpha=0.3)
+            st.samples = [st.ax.plot([], [], color="0.7", lw=0.6, alpha=0.5)[0] for _ in range(n_best)]
+            st.opt, = st.ax.plot([], [], "C3-o", lw=2.0, ms=3, label="optimal plan")
+            st.trail, = st.ax.plot([], [], "C0-", lw=1.3, alpha=0.85, label="realized")  # actual path taken
+            st.car, = st.ax.plot([], [], "o", ms=12, mfc="blue", mec="k", mew=1.0, zorder=5, label="car")
+            st.trail_x, st.trail_t = [], []
+            st.ax.legend(loc="upper left")
+        for ln, x, t in zip(st.samples, xb, tb):
+            ln.set_data(x, t)
+        st.opt.set_data(xo, to)
+        # realized trail: the actual (x, theta) the truck has passed through. s0 each solve IS the
+        # current real state; a big backward jump in x marks an episode reset -> start a fresh trail.
+        xr, tr = float(s0[0]), math.degrees(float(s0[2]))   # float() first: s0 may be a CUDA tensor
+        if st.trail_x and st.trail_x[-1] - xr > 0.5:
+            st.trail_x, st.trail_t = [], []
+        st.trail_x.append(xr); st.trail_t.append(tr)
+        st.trail.set_data(st.trail_x, st.trail_t)
+        st.car.set_data([xr], [tr])                          # blue circle = the car's current (x, theta)
+        st.fig.canvas.draw_idle(); st.fig.canvas.flush_events()
+        plt.pause(0.001)
+    except Exception as exc:                               # no display / matplotlib -> disable, don't crash
+        print(f"[plot_mppi_xtheta] disabled ({exc})")
+        plot_mppi_xtheta.off = True
 
 
 # ============================================================
@@ -190,7 +310,8 @@ class ObstacleNode:
 
         # --- estimator, logger, controller (PERSIST across episodes) ---
         self.p = WheelieParams()
-        self.cfg = MPPIConfig()
+        self.cfg = ControllerConfig()        # MPPIConfig or MPCConfig, per CONTROLLER
+
         self.rls = RLSEstimator(self.p)
         self.logger = EpisodeLogger()
 
@@ -198,14 +319,23 @@ class ObstacleNode:
         # z = [x, v, theta, omega, tau]: the FULL system input. Built ONCE and kept alive
         self.gp_cfg = SSGPConfig()
         self.gp = self.gp_cfg.build()
-        self.nmpc = MPPI(self.p, self.cfg, self.gp, integrator="rk4")
+
+        # Build the selected controller. The MPPI holds the BUILT gp object (and takes an
+        # integrator); the NMPC takes the gp CONFIG and gets the GP via gp_params each solve.
+        if CONTROLLER == "mppi":
+            self.controller = Controller(self.p, self.cfg, self.gp, integrator="rk4")
+            if LIVE_PLOT and RENDER:                       # plot only when rendering; headless leaves the
+                self.controller.plot_hook = plot_mppi_xtheta   # hook None -> a single is-not-None check per solve
+        else:  # nmpc
+            self.controller = Controller(self.p, self.cfg, self.gp_cfg)
+        print(f"[controller] {CONTROLLER}")
 
         # GP_ENABLED=False -> RLS-only rollout. Capture the GP's not-ready params (alpha=0 so
         # the contribution is zero, x_std=1 so the standardization stays finite) as the
         # neutral vector handed to the controller.
         self.gp_params_zero = self.gp.mpc_params().copy()
         if not GP_ENABLED:
-            print("[GP DISABLED] MPPI rollout uses RLS only (the GP still learns + logs).")
+            print("[GP DISABLED] controller rollout uses RLS only (the GP still learns + logs).")
 
         # The unique MPPI reference: reach the goal (v_ref=0 so it stops there; the
         # theta/omega entries are ignored because their cost weights are 0).
@@ -262,15 +392,7 @@ class ObstacleNode:
     # --- subscriptions (sensor reads) ---
 
     def read_imu(self) -> tuple[float, float, float, float]:
-        """pitch, pitch-rate, v_dot, omega_dot from the on-board IMU (the convention the
-        nominal RLS weights were identified in). Pitch comes from the IMU quaternion, the
-        pitch rate from the gyro y-axis. The accelerometer (body frame) is rotated to world
-        by the IMU quaternion; gravity is vertical so it leaves world-x alone, and omega_dot
-        is the gyro-rate difference. A single-step outlier gate holds the last good accel
-        over a contact impact instead of feeding the spike to the estimator/GP.
 
-        Has a side-effect (updates self._prev_omega for the differencing), so call it ONCE
-        per control step. log_row() reuses the cached self.last_state instead of re-reading."""
         w = float(self.data.sensordata[self.quat_adr + 0])
         x = float(self.data.sensordata[self.quat_adr + 1])
         y = float(self.data.sensordata[self.quat_adr + 2])
@@ -331,7 +453,7 @@ class ObstacleNode:
         self.gp_pred_omega_dot_pre = 0.0
         self.last_rls_info = empty_rls_info()
         self.last_state = np.zeros(4)
-        self.nmpc.last_solution = None      # fresh warm start each episode
+        self.controller.last_solution = None      # fresh warm start each episode
 
     def step(self):
         mujoco.mj_step(self.model, self.data)
@@ -341,6 +463,14 @@ class ObstacleNode:
         return float(self.data.time)
 
     # --- control / run ---
+    def _solve(self, state):
+        """Call the active controller with the right signature. The MPPI reads the GP
+        through its held gp object; the NMPC needs the flat gp_params each solve."""
+        if CONTROLLER == "mppi":
+            return self.controller.solve(state, self.ref, self.tau_prev, self.rls.a)
+        gp_params = self.gp.mpc_params() if GP_ENABLED else self.gp_params_zero
+        return self.controller.solve(state, self.ref, self.tau_prev, self.rls.a, gp_params)
+
     def control_update(self):
         x, v = self.read_odometry()
         pitch, rate, vdot, wdot = self.read_imu()
@@ -369,7 +499,7 @@ class ObstacleNode:
             # a fixed model and the impulsive omega spikes are smoothed as noise by the fit.
             self.gp.observe(z, self.res_v_dot, self.res_omega_dot)
 
-        tau, info = self.nmpc.solve(state_now, self.ref, self.tau_prev, self.rls.a)
+        tau, info = self._solve(state_now)
         tau = float(np.clip(tau, self.p.tau_min, self.p.tau_max))
         ctrl = float(np.clip(tau, self.ctrl_min, self.ctrl_max))
         self.publish_command(ctrl)
@@ -434,19 +564,19 @@ class ObstacleNode:
             "omega_dot_rls": float(info["omega_dot_hat"]),
             "omega_dot_error": float(info["omega_dot_error"]),
 
-            # v_dot coeffs: v_dot = b_tau*tau + b_v*v + b_abs_v*|v|v + b_tau_cos*tau*cos(theta) + b_0
-            "b_tau": float(a_rls[0]),
-            "b_v": float(a_rls[1]),
-            "b_abs_v": float(a_rls[2]),
-            "b_tau_cos": float(a_rls[3]),
-            "b_0": float(a_rls[4]),
+            # # v_dot coeffs: v_dot = b_tau*tau + b_v*v + b_abs_v*|v|v + b_tau_cos*tau*cos(theta) + b_0
+            # "b_tau": float(a_rls[0]),
+            # "b_v": float(a_rls[1]),
+            # "b_abs_v": float(a_rls[2]),
+            # "b_tau_cos": float(a_rls[3]),
+            # "b_0": float(a_rls[4]),
 
-            # omega_dot coeffs: omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0
-            "a_g": float(a_rls[5]),
-            "a_tau": float(a_rls[6]),
-            "a_omega": float(a_rls[7]),
-            "a_v": float(a_rls[8]),
-            "a_0": float(a_rls[9]),
+            # # omega_dot coeffs: omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0
+            # "a_g": float(a_rls[5]),
+            # "a_tau": float(a_rls[6]),
+            # "a_omega": float(a_rls[7]),
+            # "a_v": float(a_rls[8]),
+            # "a_0": float(a_rls[9]),
 
             # GP residual: measured target fed to the GP (r_*) and the GP's own prediction at
             # the current state. Plot these vs x to see the obstacle the GP has localised.
