@@ -39,21 +39,21 @@ except ImportError as exc:
 @dataclass
 class WheelieParams:
     m: float = 5.1          # total mass of the vehicle
-    l: float = 0.18 #0.18         # rear axle to COM DISTANCE
+    l: float = 0.2 #0.18         # rear axle to COM DISTANCE
     I_body: float = (1/12)*(m)*(0.53**2 + 0.30**2)    #Inertia calculation I_body = 1/12 * mass(Lenght^2 + Height^2) 0.04
     r: float = 0.085         #
     g: float = 9.81         #
-    c_v: float = 9.0        #
-    tau_min: float = 0.0
-    tau_max: float = 12.0
-    theta_min: float = math.radians(0.0)
-    theta_max: float = math.radians(100.0)
+    c_v: float = 7.0        #
+    tau_min: float = -8.0
+    tau_max: float = 8.0
+    theta_min: float = math.radians(-100.0)
+    theta_max: float = math.radians(0.0)
     omega_min: float = -8.0
     omega_max: float = 8.0
-    v_min: float = -4.0
-    v_max: float = 4.0
+    v_min: float = -5.0
+    v_max: float = 5.0
 
-    pitch_ref: float = 80.0
+    pitch_ref: float = -70.0
     sim_time: float = 15.0
     sim_dt: float = 0.1
 
@@ -64,16 +64,16 @@ class WheelieParams:
 
 @dataclass
 class MPCConfig:
-    dt: float = 0.1
-    N: int = 35
+    dt: float = 0.05
+    N: int = 20
     q_x: float = 0.0
     q_v: float = 0.01
-    q_theta: float = 1000.0
+    q_theta: float = 10.0
     q_omega: float = 15.0
     r_tau: float = 0.1
     r_dtau: float = 0.01
-    q_terminal_theta: float = 400.0
-    q_terminal_omega: float = 100.0
+    q_terminal_theta: float = 40.0
+    q_terminal_omega: float = 10.0
     ipopt_max_iter: int = 50
 
 
@@ -85,7 +85,7 @@ def continuous_dynamics_np(state: np.ndarray, tau: float, p: WheelieParams) -> n
     x_dot = v
     v_dot = tau / (p.m * p.r) - p.c_v * v
     pitch_dot = omega
-    omega_dot = (-tau + p.m * p.g * p.l * math.cos(theta)) / p.I_eff + noise
+    omega_dot = (-tau - p.m * p.g * p.l * math.sin(theta)) / p.I_eff + noise
     dynamics = np.array([x_dot, v_dot, pitch_dot, omega_dot], dtype=float)
     
     
@@ -262,7 +262,7 @@ class WheelieNMPC:
             tau = float(U_opt[0, 0])
             info = {"success": True, "cost": float(sol["f"])}
 
-            print("[TAU]: ", np.clip(tau/self.p.tau_max, -1.0, 1.0))
+            #print("[TAU]: ", np.clip(tau/self.p.tau_max, -1.0, 1.0))
             #print("[TAU]: ", tau)
 
             return tau, info

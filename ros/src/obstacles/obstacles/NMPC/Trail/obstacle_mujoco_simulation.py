@@ -19,15 +19,14 @@ for _sub in ("mppi", "gp", "rls", "nmpc"):
         sys.path.insert(0, _p)
 
 # ---- Controller selection -------------------------------------------------------
-# Set CONTROLLER = "mppi" for the GPU MPPI (mppi_torch.MPPITorch) or "nmpc" for the
-# casadi/IPOPT NMPC (nmpc.NMPC). This one switch drives everything below: the imports,
-# the config class, how the controller is built, and how solve() is called. Only the
-# selected controller's deps are imported (torch for mppi, casadi for nmpc).
 CONTROLLER = "mppi"          # "nmpc" or "mppi"
 
 if CONTROLLER == "mppi":
     from params_mppi import WheelieParams, MPPIConfig as ControllerConfig
-    from mppi_torch import MPPITorch as Controller
+
+    #from mppi_gp import MPPITorch as Controller
+    from mppi_dynamics import MPPITorch as Controller
+    # from mppi_rls import MPPITorch as Controller
 elif CONTROLLER == "nmpc":
     from params_nmpc import WheelieParams, MPCConfig as ControllerConfig
     from nmpc import NMPC as Controller
@@ -53,11 +52,11 @@ RENDER   = True       # True = watch the truck; False = fast headless run
 CTRL_DT  = 0.05       # control / MPPI period [s]
 INIT_Z   = 0.1512     # spawn height
 SIM_TIME = 20.0       # per-episode time cap [s]
-PRINT_EVERY_N_CONTROLS = 5
+PRINT_EVERY_N_CONTROLS = 1
 
 # Episodic learning: the GP (and RLS) persist across episodes, the MuJoCo state is
 # reset each episode. Episode 1 learns where the obstacle is; episode 2 reuses that.
-N_EPISODES = 50
+N_EPISODES = 2
 
 # GP settings
 LOAD_MODEL = False    # True = RESUME from a saved model (GP posterior + RLS state)
@@ -139,74 +138,6 @@ def empty_rls_info() -> dict:
         "v_dot_error": 0.0,
         "omega_dot_error": 0.0,
     }
-
-
-# ============================================================
-# Live MPPI trajectory plot (X vs theta)
-# ============================================================
-
-
-def plot_mppi_xtheta(mppi, s0, U, S, U_opt, a, dt, n_best=100):
-    """Live X-vs-theta view of what the MPPI is planning at the CURRENT control step. It
-    re-rolls, through the SAME RLS+GP model the controller uses, the `n_best` lowest-cost
-    SAMPLED rollouts (faint grey) and the OPTIMAL control sequence (bold red), and updates a
-    single persistent figure each call. Called once per solve from mppi_torch.solve(); a
-    no-op unless LIVE_PLOT is True, and it disables itself if matplotlib/the display fails
-    (so it is safe to leave in for headless runs)."""
-    if not LIVE_PLOT or plot_mppi_xtheta.__dict__.get("off"):
-        return
-    try:
-        import torch
-        import matplotlib.pyplot as plt
-        N = int(U.shape[1])
-        with torch.no_grad():
-            # n_best lowest-cost sampled rollouts (one batched re-roll)
-            idx = torch.argsort(S)[:n_best]
-            sb = s0.unsqueeze(0).repeat(idx.numel(), 1)
-            xb, tb = [sb[:, 0].clone()], [sb[:, 2].clone()]
-            for n in range(N):
-                sb = mppi._step(sb, U[idx, n], a, dt)
-                xb.append(sb[:, 0].clone()); tb.append(sb[:, 2].clone())
-            xb = torch.stack(xb, 1).cpu().numpy()
-            tb = np.degrees(torch.stack(tb, 1).cpu().numpy())
-            # optimal rollout
-            so = s0.unsqueeze(0)
-            xo, to = [so[:, 0].clone()], [so[:, 2].clone()]
-            for n in range(N):
-                so = mppi._step(so, U_opt[n:n + 1], a, dt)
-                xo.append(so[:, 0].clone()); to.append(so[:, 2].clone())
-            xo = torch.stack(xo, 1).cpu().numpy().ravel()
-            to = np.degrees(torch.stack(to, 1).cpu().numpy().ravel())
-        st = plot_mppi_xtheta                              # persistent state on the function itself
-        if "fig" not in st.__dict__:
-            plt.ion()
-            st.fig, st.ax = plt.subplots()
-            st.ax.set(xlabel="x [m]", ylabel="theta [deg]", xlim=(-2.0, GOAL_X+2), ylim=(-120, 120),
-                      title="MPPI planned trajectories (X vs theta)")
-            st.ax.axvspan(1.7, 2.3, color="0.85", zorder=0)      # obstacle x-span (obs_box_2)
-            st.ax.grid(True, alpha=0.3)
-            st.samples = [st.ax.plot([], [], color="0.7", lw=0.6, alpha=0.5)[0] for _ in range(n_best)]
-            st.opt, = st.ax.plot([], [], "C3-o", lw=2.0, ms=3, label="optimal plan")
-            st.trail, = st.ax.plot([], [], "C0-", lw=1.3, alpha=0.85, label="realized")  # actual path taken
-            st.car, = st.ax.plot([], [], "o", ms=12, mfc="blue", mec="k", mew=1.0, zorder=5, label="car")
-            st.trail_x, st.trail_t = [], []
-            st.ax.legend(loc="upper left")
-        for ln, x, t in zip(st.samples, xb, tb):
-            ln.set_data(x, t)
-        st.opt.set_data(xo, to)
-        # realized trail: the actual (x, theta) the truck has passed through. s0 each solve IS the
-        # current real state; a big backward jump in x marks an episode reset -> start a fresh trail.
-        xr, tr = float(s0[0]), math.degrees(float(s0[2]))   # float() first: s0 may be a CUDA tensor
-        if st.trail_x and st.trail_x[-1] - xr > 0.5:
-            st.trail_x, st.trail_t = [], []
-        st.trail_x.append(xr); st.trail_t.append(tr)
-        st.trail.set_data(st.trail_x, st.trail_t)
-        st.car.set_data([xr], [tr])                          # blue circle = the car's current (x, theta)
-        st.fig.canvas.draw_idle(); st.fig.canvas.flush_events()
-        plt.pause(0.001)
-    except Exception as exc:                               # no display / matplotlib -> disable, don't crash
-        print(f"[plot_mppi_xtheta] disabled ({exc})")
-        plot_mppi_xtheta.off = True
 
 
 # ============================================================
@@ -323,9 +254,9 @@ class ObstacleNode:
         # Build the selected controller. The MPPI holds the BUILT gp object (and takes an
         # integrator); the NMPC takes the gp CONFIG and gets the GP via gp_params each solve.
         if CONTROLLER == "mppi":
-            self.controller = Controller(self.p, self.cfg, self.gp, integrator="rk4")
-            if LIVE_PLOT and RENDER:                       # plot only when rendering; headless leaves the
-                self.controller.plot_hook = plot_mppi_xtheta   # hook None -> a single is-not-None check per solve
+            self.controller = Controller(self.p, self.cfg, self.gp, integrator="rk4",
+                                         live_plot=(LIVE_PLOT and RENDER))
+            self.controller.plot_obstacle_span = (1.7, 2.3)   # obstacle x-span shaded in the plan plot
         else:  # nmpc
             self.controller = Controller(self.p, self.cfg, self.gp_cfg)
         print(f"[controller] {CONTROLLER}")
@@ -339,7 +270,8 @@ class ObstacleNode:
 
         # The unique MPPI reference: reach the goal (v_ref=0 so it stops there; the
         # theta/omega entries are ignored because their cost weights are 0).
-        self.ref = np.array([GOAL_X, 0.0, 0.0, 0.0], dtype=float)
+        # references = [xpos, velocity, theta, theta_dot]
+        self.ref = np.array([GOAL_X, 0.0, -1.22, 0.0], dtype=float)
 
         # Optionally RESUME from a previously saved model (GP posterior + RLS state).
         if LOAD_MODEL and MODEL_PATH.exists():
@@ -467,9 +399,16 @@ class ObstacleNode:
         """Call the active controller with the right signature. The MPPI reads the GP
         through its held gp object; the NMPC needs the flat gp_params each solve."""
         if CONTROLLER == "mppi":
-            return self.controller.solve(state, self.ref, self.tau_prev, self.rls.a)
-        gp_params = self.gp.mpc_params() if GP_ENABLED else self.gp_params_zero
-        return self.controller.solve(state, self.ref, self.tau_prev, self.rls.a, gp_params)
+            tau_opt, info = self.controller.solve(state, self.ref, self.tau_prev, self.rls.a)
+            return tau_opt, info
+        
+        if GP_ENABLED:
+            gp_params = self.gp.mpc_params() 
+        else:
+            gp_params = self.gp_params_zero
+        
+        tau_opt, info = self.controller.solve(state, self.ref, self.tau_prev, self.rls.a, gp_params)
+        return tau_opt, info
 
     def control_update(self):
         x, v = self.read_odometry()
@@ -509,6 +448,7 @@ class ObstacleNode:
         self.tau_cmd = tau
         self.ctrl_cmd = ctrl
         self.solve_success = bool(info["success"])
+        self.cost = info["cost"]
 
         if self.control_count % PRINT_EVERY_N_CONTROLS == 0:
             print(
@@ -516,7 +456,7 @@ class ObstacleNode:
                 f"x={state_now[0]:7.3f} | v={state_now[1]:7.3f} | "
                 f"pitch={math.degrees(state_now[2]):8.2f} deg | "
                 f"omega={state_now[3]:8.3f} | tau={tau:8.3f} | "
-                f"ctrl={ctrl:8.3f} | success={info['success']} | "
+                f"ctrl={ctrl:8.3f} | cost={info['cost']} | "
                 f"rls_err[v={self.last_rls_info['v_dot_error']:6.3f}, "
                 f"w={self.last_rls_info['omega_dot_error']:6.3f}]"
             )

@@ -85,7 +85,7 @@
 
       <!-- Green bar at the end-->
       <geom name="pole_1" type="cylinder"
-            pos="10.0 0.0 2.05"
+            pos="30.0 0.0 2.05"
             size="0.10 1.50"
             euler="1.5708 0 0"
             rgba="0.2 0.7 0.2 1"

@@ -10,7 +10,6 @@ class MPPITorch:
     K = MPPIConfig.K            # number of sampled rollouts
     SIGMA = MPPIConfig.SIGMA        # exploration std on tau
     LAM = MPPIConfig.LAM           # temperature (softmin sharpness)
-    BETA = MPPIConfig.BETA          # AR(1) smoothing of the control noise along the horizon
     SEED = MPPIConfig.SEED
 
     def __init__(self, p, cfg, gp, device=None, fast=True, integrator="euler", dtype=None):
@@ -120,52 +119,97 @@ class MPPITorch:
                          s[:, 3].clamp(-30.0, 30.0)], dim=-1)
         return s
 
-    # ------------------------------------------------------------------ #
-    # Stage cost: total penalty for being in state `s` and applying `tau`.
-    # It is a sum of named terms; each has its OWN weight. Smaller total = better
-    # rollout. Set any weight to 0 to switch that term off.
-    # ------------------------------------------------------------------ #
-    def _stage_cost(self, s, tau, tau_prev, ref, c):
-        # state   s   = [x, v, theta, omega]
-        # ref         = [x_goal, v_ref, theta_ref, omega_ref]
-        x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
 
-        # 1) tracking errors (state - reference)
-        e_x      = x     - ref[0]        # how far from the goal position
-        e_v      = v     - ref[1]        # speed error
-        e_theta  = theta - ref[2]        # pitch error
-        e_omega  = omega - ref[3]        # pitch-rate error
-        d_tau    = tau   - tau_prev      # torque change since last step
 
-        # 2) quadratic tracking / effort penalties  (weight * error^2)
-        cost_goal       = c["q_x"]    * e_x ** 2       # q_x     : reach the goal position
-        cost_speed      = c["q_v"]    * e_v ** 2       # q_v     : hold the reference speed
-        cost_pitch      = c["q_th"]   * e_theta ** 2   # q_theta : keep pitch near reference (stay flat)
-        cost_pitch_rate = c["q_om"]   * e_omega ** 2   # q_omega : damp the pitch rate
-        cost_torque     = c["r_tau"]  * tau ** 2       # r_tau   : use less torque
-        cost_smooth     = c["r_dtau"] * d_tau ** 2     # r_dtau  : avoid jerky torque changes
 
-        # 3) smooth flip barrier: ~0 while |pitch| < theta_soft, then rises steeply (4th
-        #    power) past it -- discourages big pitch WITHOUT a hard cliff. q_flip = strength.
-        over_soft = torch.clamp(theta ** 2 - c["th_soft"] ** 2, min=0.0)   # >0 once |theta|>theta_soft
-        cost_flip = c["q_flip"] * over_soft ** 2       # q_flip   : discourage rearing past theta_soft
 
-        # 4) climb-rate barrier: one-sided -- only when ALREADY past theta_climb AND still
-        #    pitching up (omega>0). Penalizes rearing further. q_flipw = strength.
-        rearing    = (theta - c["th_climb"] > 0.0) & (omega > 0.0)
-        cost_climb = c["q_flipw"] * torch.where(rearing, (theta - c["th_climb"]) * omega,
-                                                torch.zeros_like(theta))   # q_flipw : stop over-rearing
+    # def _stage_cost(self, s, tau, tau_prev, ref, c):
+    #     # state   s   = [x, v, theta, omega]
+    #     # ref         = [x_goal, v_ref, theta_ref, omega_ref]
+    #     x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
 
-        # 5) hard tip-over wall: forbid |pitch| beyond theta_max with a big flat cost
-        cost_wall = torch.where(theta.abs() > c["th_max"],
-                                torch.full_like(theta, 1e4), torch.zeros_like(theta))  # theta_max
+    #     # 1) tracking errors (state - reference)
+    #     e_x      = x     - ref[0]        # how far from the goal position
+    #     e_v      = v     - ref[1]        # speed error
+    #     e_theta  = theta - ref[2]        # pitch error
+    #     e_omega  = omega - ref[3]        # pitch-rate error
+    #     d_tau    = tau   - tau_prev      # torque change since last step
 
-        #return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate + cost_torque)
+    #     # 2) quadratic tracking / effort penalties  (weight * error^2)
+    #     cost_goal       = c["q_x"]    * e_x ** 2       # q_x     : reach the goal position
+    #     cost_speed      = c["q_v"]    * e_v ** 2       # q_v     : hold the reference speed
+    #     cost_pitch      = c["q_th"]   * e_theta ** 2   # q_theta : keep pitch near reference (stay flat)
+    #     cost_pitch_rate = c["q_om"]   * e_omega ** 2   # q_omega : damp the pitch rate
+    #     cost_torque     = c["r_tau"]  * tau ** 2       # r_tau   : use less torque
+    #     cost_smooth     = c["r_dtau"] * d_tau ** 2     # r_dtau  : avoid jerky torque changes
 
-        return cost_goal + cost_pitch*100
+    #     # 3) smooth flip barrier: ~0 while |pitch| < theta_soft, then rises steeply (4th
+    #     #    power) past it -- discourages big pitch WITHOUT a hard cliff. q_flip = strength.
+    #     over_soft = torch.clamp(theta ** 2 - c["th_soft"] ** 2, min=0.0)   # >0 once |theta|>theta_soft
+    #     cost_flip = c["q_flip"] * over_soft ** 2       # q_flip   : discourage rearing past theta_soft
 
-        # return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate + cost_torque
-        #         + cost_smooth + cost_flip + cost_climb + cost_wall)
+    #     # 4) climb-rate barrier: one-sided -- only when ALREADY past theta_climb AND still
+    #     #    pitching up (omega>0). Penalizes rearing further. q_flipw = strength.
+    #     rearing    = (theta - c["th_climb"] > 0.0) & (omega > 0.0)
+    #     cost_climb = c["q_flipw"] * torch.where(rearing, (theta - c["th_climb"]) * omega,
+    #                                             torch.zeros_like(theta))   # q_flipw : stop over-rearing
+
+    #     # 5) hard tip-over wall: forbid |pitch| beyond theta_max with a big flat cost
+    #     cost_wall = torch.where(theta.abs() > c["th_max"],
+    #                             torch.full_like(theta, 1e4), torch.zeros_like(theta))  # theta_max
+
+    #     #return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate + cost_torque)
+
+    #     #return cost_goal + cost_pitch*100
+
+    #     return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate + cost_torque
+    #             + cost_smooth + cost_flip + cost_climb + cost_wall)
+
+
+
+
+    def _stage_cost(self, s, tau, tau_prev, ref):
+            cfg, p = self.cfg, self.p
+            x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
+
+            e_x     = x     - ref[0]      # position error
+            e_v     = v     - ref[1]      # speed error
+            e_theta = theta - ref[2]      # pitch error
+            e_omega = omega - ref[3]      # pitch-rate error
+            d_tau   = tau   - tau_prev    # torque change since last step
+
+            cost_goal       = cfg.q_x     * e_x     ** 2
+            cost_speed      = cfg.q_v     * e_v     ** 2
+            cost_pitch      = cfg.q_theta * e_theta ** 2
+            cost_pitch_rate = cfg.q_omega * e_omega ** 2
+            cost_torque     = cfg.r_tau   * tau     ** 2
+            cost_smooth     = cfg.r_dtau  * d_tau   ** 2
+
+            return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate + cost_torque)
+
+            # # smooth flip barrier: ~0 until |pitch| > theta_soft, then rises steeply
+            # over_soft = torch.clamp(theta ** 2 - self.theta_soft ** 2, min=0.0)
+            # cost_flip = cfg.q_flip * over_soft ** 2
+
+            # # one-sided climb barrier: only past theta_climb AND still pitching up
+            # rearing    = (theta - self.theta_climb > 0.0) & (omega > 0.0)
+            # cost_climb = self.q_flipw * torch.where(rearing,
+            #                                         (theta - self.theta_climb) * omega,
+            #                                         torch.zeros_like(theta))
+
+            # # hard tip-over wall
+            # cost_wall = torch.where(theta.abs() > p.theta_max,
+            #                         torch.full_like(theta, 1e4),
+            #                         torch.zeros_like(theta))
+
+            #     #return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate + cost_torque)
+
+            #     #return cost_goal + cost_pitch*100
+
+            # return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate
+            #         + cost_torque + cost_smooth + cost_flip + cost_climb + cost_wall)
+    
+
 
     # ------------------------------------------------------------------ #
     # Risk term (optional, weight q_gp_var): penalize planning into states the GP has
@@ -181,67 +225,67 @@ class MPPITorch:
         return u_v + u_w                                  # each in [0,1]; weight applied by caller
 
     # ---- the controller: state in -> action out ---------------------------
+# ---- the controller: state in -> action out ---------------------------
+    #  Information-theoretic MPPI:
+    #   1. sample K control sequences   V^m = U_nom + eps^m,  eps^m ~ N(0, sigma^2) i.i.d.
+    #   2. roll each through F, summing the cost J(X^m, V^m)                 (1),(2)
+    #   3. weight them  w^m = exp(-J^m/lambda) / sum_j exp(-J^j/lambda)      (3),(4)
+    #   4. update  U* = U_nom + sum_m w^m eps^m,  apply the first action     (5)
     @torch.no_grad()
     def solve(self, state, ref, tau_prev, a_rls):
         p, cfg, dev = self.p, self.cfg, self.device
-        N, dt = int(cfg.N), float(cfg.dt)
+        K, N, dt = self.K, int(cfg.N), float(cfg.dt)
+        lam, sigma = float(self.LAM), float(self.SIGMA)      # temperature, exploration std
         tau_min, tau_max = float(p.tau_min), float(p.tau_max)
         tau_prev = float(tau_prev)
 
-        s0 = torch.as_tensor(state, dtype=self.dtype, device=dev).reshape(-1)
-        ref = torch.as_tensor(ref, dtype=self.dtype, device=dev).reshape(-1)
-        a = torch.as_tensor(a_rls, dtype=self.dtype, device=dev).reshape(-1)
-        c = {k: float(v) for k, v in dict(
-            q_x=cfg.q_x, q_v=cfg.q_v, q_th=cfg.q_theta, q_om=cfg.q_omega,
-            r_tau=cfg.r_tau, r_dtau=cfg.r_dtau,
-            q_flip=cfg.q_flip,                                  # flip-barrier strength
-            th_soft=math.radians(cfg.theta_soft_deg),           # flip-barrier threshold [rad]
-            q_flipw=getattr(cfg, "q_flipw", 0.0),               # climb-barrier strength (0 = off)
-            th_climb=math.radians(getattr(cfg, "theta_climb_deg", 90.0)),  # climb threshold [rad]
-            th_max=p.theta_max).items()}                        # hard tip-over wall [rad]
+        s0  = torch.as_tensor(state, dtype=self.dtype, device=dev).reshape(-1)   # (4,)
+        ref = torch.as_tensor(ref,   dtype=self.dtype, device=dev).reshape(-1)   # (4,)
+        a   = torch.as_tensor(a_rls, dtype=self.dtype, device=dev).reshape(-1)   # dynamics params
 
-        U_nom = self._warm_start(N, tau_prev)            # (N,)
-        U = self._sample_controls(U_nom, tau_min, tau_max)   # (K,N)
-        eps = U - U_nom.unsqueeze(0)
+        # 1. sample K control sequences around the warm-started nominal
+        U_nom = self._warm_start(N, tau_prev)                                    # (N,)  u_t
+        eps = sigma * torch.randn(K, N, generator=self.gen,
+                                  dtype=self.dtype, device=dev)                  # (K,N) ~ N(0, sigma^2)
+        U = torch.clamp(U_nom.unsqueeze(0) + eps, tau_min, tau_max)             # (K,N) V^m
+        eps = U - U_nom.unsqueeze(0)                                            # effective noise after clamp
 
-        s = s0.unsqueeze(0).repeat(self.K, 1)            # (K,4)
-        S = torch.zeros(self.K, dtype=self.dtype, device=dev)
-        prev = torch.full((self.K,), tau_prev, dtype=self.dtype, device=dev)
+        # 2. roll every sequence through the dynamics and accumulate its cost J
+        s = s0.unsqueeze(0).repeat(K, 1)                                         # (K,4) all start at x_0
+        J = torch.zeros(K, dtype=self.dtype, device=dev)
+        prev = torch.full((K,), tau_prev, dtype=self.dtype, device=dev)
+
+        # Running Cost
         for n in range(N):
-            tau = U[:, n]
-            s = self._step(s, tau, a, dt)
-            S = S + self._stage_cost(s, tau, prev, ref, c)
-            if self.q_gp_var > 0.0:                       # risk-averse: avoid UNMODELLED states
-                S = S + self.q_gp_var * self._risk(s, tau)
+            tau = U[:, n]                                                        # u_n for every sample
+            J = J + self._stage_cost(s, tau, prev, ref)                       # running cost l(x_n, u_n)
+            s = self._step(s, tau, a, dt)                                        # x_{n+1} = F(x_n, u_n)
             prev = tau
-        ex, ev = s[:, 0] - ref[0], s[:, 1] - ref[1]      # terminal goal cost
-        S = S + c["q_x"] * ex * ex + c["q_v"] * ev * ev
+        
+        # Terminal Cost
+        e = s - ref                                                             # terminal cost phi(x_N)
+        J = J + cfg.q_x * e[:, 0]**2
+        # J = J + (cfg.q_x * e[:, 0]**2 + cfg.q_v * e[:, 1]**2
+        #          + cfg.q_theta * e[:, 2]**2 + cfg.q_omega * e[:, 3]**2)
+        J = torch.nan_to_num(J, nan=1e12, posinf=1e12, neginf=1e12)
 
-        S = torch.nan_to_num(S, nan=1e12, posinf=1e12, neginf=1e12)
-        rho = S.min()
-        scale = torch.clamp(S.median() - rho, min=1e-6)
-        w = torch.exp(-(S - rho) / (self.LAM * scale))
-        w = w / (w.sum() + 1e-12)
+        # 3. costs -> weights  (subtract min cost rho first; it cancels but avoids overflow)
+        rho = J.min()
+        w = torch.exp(-(J - rho) / lam)                                          # exp(-(J - rho)/lambda)
+        w = w / w.sum()                                                          # normalize (sum >= 1)
 
+        # 4. weighted update; U_opt is the new plan, U_opt[0] is the action applied
         U_opt = torch.clamp(U_nom + (w.unsqueeze(1) * eps).sum(0), tau_min, tau_max)
-        self.last_solution = U_opt
-        if self.plot_hook is not None: self.plot_hook(self, s0, U, S, U_opt, a, dt)  # live plot only if a hook is set
+        self.last_solution = U_opt                                              # warm start next call
+
+        if self.plot_hook is not None:
+            self.plot_hook(self, s0, U, J, U_opt, a, dt)
         return float(U_opt[0].item()), {"success": True, "cost": float(rho.item())}
 
     def _warm_start(self, N, tau_prev):
         if self.last_solution is None:
             return torch.full((N,), tau_prev, dtype=self.dtype, device=self.device)
         return torch.cat([self.last_solution[1:], self.last_solution[-1:]])
-
-    def _sample_controls(self, U_nom, tau_min, tau_max):
-        K, N = self.K, U_nom.numel()
-        raw = torch.randn(K, N, generator=self.gen, dtype=self.dtype, device=self.device) * self.SIGMA
-        eps = torch.empty(K, N, dtype=self.dtype, device=self.device)
-        eps[:, 0] = raw[:, 0]
-        cc = math.sqrt(1.0 - self.BETA ** 2)
-        for n in range(1, N):                            # AR(1) smoothing along the horizon
-            eps[:, n] = self.BETA * eps[:, n - 1] + cc * raw[:, n]
-        return torch.clamp(U_nom.unsqueeze(0) + eps, tau_min, tau_max)
 
 
 # ============================================================================ #
