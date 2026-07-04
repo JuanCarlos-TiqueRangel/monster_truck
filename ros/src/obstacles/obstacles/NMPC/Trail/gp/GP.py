@@ -514,7 +514,7 @@ class GPConfig:
     LEARNED at runtime, so they are NOT set here -- the controller only reads max_points
     (inducing-set size M) and n_features (= d). `kernel` picks the kernel SHAPE and is
     auto-propagated to the controllers via the exported kernel_id."""
-    max_points: int = 50         # inducing-set size M (= controller rollout M)
+    max_points: int = 1000         # inducing-set size M (= controller rollout M)
     n_features: int = 5           # feature dim d for z = [x, v, theta, omega, tau]
     kernel: str = DEFAULT_KERNEL  # "matern12" | "matern32" | "matern52" | "rbf"
     n_iter_fit: int = 150         # Adam iters on the FIRST fit (build structure)

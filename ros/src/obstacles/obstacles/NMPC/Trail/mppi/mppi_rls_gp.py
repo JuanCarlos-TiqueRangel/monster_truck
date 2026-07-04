@@ -6,7 +6,6 @@ from params_mppi import MPPIConfig
 import matplotlib.pyplot as plt
 import numpy as np
 from types import SimpleNamespace
-from nominal_model import M, R, G, RHO, ALPHA, I_A, C_OMEGA, KV, CV
 
 class MPPITorch:
     # same sampler settings as the numba mppi.py so behaviour is comparable
@@ -116,59 +115,33 @@ class MPPITorch:
 
     def _deriv(self, s, tau):
 
-            x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
+        M, R, G = 5.1, 0.081, 9.81
+        L_R = 0.20                                   # CoM -> rear axle, horizontal [m]
+        H   = 0.16                                   # CoM height when flat [m]
+        RHO   = math.hypot(L_R, H - R)               # 0.215 m
+        ALPHA = math.atan2(H - R, L_R)               # 0.377 rad
+        I_C   = (1.0 / 12.0) * M * (0.53**2 + 0.30**2)
+        I_A   = I_C + M * RHO**2                     # 0.394 kg m^2, about the rear contact
+        C_OMEGA = 0.2                                # small pitch damping, tune to MuJoCo
 
-            if self.gp is not None:
-                X = torch.stack([x, v, theta, omega, tau], dim=-1)
-                res_v, res_w = self.gp.predict_torch_fast(X, dtype=self.dtype)
-            else:
-                res_v = res_w = torch.zeros_like(v)
+        x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
 
-            beta = ALPHA - theta
-            lever_drive = R + RHO * torch.sin(beta)
-            lever_gravity = RHO * torch.cos(beta)
-            omega_dot = (-(tau / R) * lever_drive + M * G * lever_gravity) / I_A \
-                        - C_OMEGA * omega
-            on_ground = (theta >= 0.0) & (omega_dot > 0.0)
-            omega_dot = torch.where(on_ground, torch.zeros_like(omega_dot), omega_dot)
-            omega_dot = omega_dot + res_w        # residual AFTER the clamp = nominal_model + r
+        # GP RESIDUAL INFO
+        X = torch.stack([x, v, theta, omega, tau], dim=-1)     # (K,5) feature z=[x,v,theta,omega,tau]
+        res_v, res_w = self.gp.predict_torch_fast(X, dtype=self.dtype)
 
-            x_dot = v
-            v_dot = KV * tau - CV * v + res_v
-            theta_dot = omega
-            return torch.stack([x_dot, v_dot, theta_dot, omega_dot], dim=-1)
+        beta = ALPHA - theta
+        lever_drive   = R + RHO * torch.sin(beta)        # CoM height, grows with rear-up
+        lever_gravity = RHO * torch.cos(beta)            # horizontal offset, shrinks
+        omega_dot = (-(tau / R) * lever_drive + M * G * lever_gravity) / I_A - C_OMEGA * omega + res_w
+        on_ground = (theta >= 0.0) & (omega_dot > 0.0)   # floor absorbs nose-down push
+        omega_dot = torch.where(on_ground, torch.zeros_like(omega_dot), omega_dot) 
 
+        x_dot = v
+        v_dot = (tau / (M * R)) + res_v
+        theta_dot = omega
+        return torch.stack([x_dot, v_dot, theta_dot, omega_dot], dim=-1)
 
-    # # ---- dynamics: nominal dynamics  ---
-    # def _deriv(self, s, tau):
-    #     x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
-
-    #     if self.gp is not None:
-    #         X = torch.stack([x, v, theta, omega, tau], dim=-1)
-    #         res_v, res_w = self.gp.predict_torch_fast(X, dtype=self.dtype)
-    #     else:
-    #         res_v = res_w = torch.zeros_like(v)
-
-    #     m = 5.1
-    #     r = 0.081
-    #     g = 9.81
-    #     l = 0.2
-    #     L_car = 0.53
-    #     H_body = 0.30
-
-    #     I_body = (1.0 / 12.0) * m * (L_car**2 + H_body**2)
-    #     I_eff = I_body + m * l**2
-
-    #     omega_dot = ((-tau + m * g * l * torch.cos(theta)) / I_eff) 
-    #     on_ground = (theta >= 0.0) & (omega_dot > 0.0)
-    #     omega_dot = torch.where(on_ground, torch.zeros_like(omega_dot), omega_dot)
-    #     omega_dot = omega_dot + res_w
-
-    #     x_dot = v
-    #     v_dot = (tau / (m * r)) + res_v
-    #     theta_dot = omega
-
-    #     return torch.stack([x_dot, v_dot, theta_dot, omega_dot], dim=-1)
 
 
     def _step(self, s, tau, dt):
@@ -212,22 +185,11 @@ class MPPITorch:
             cost_torque     = cfg.r_tau   * tau     ** 2
             cost_smooth     = cfg.r_dtau  * d_tau   ** 2
 
+            # cg = cost_goal.mean().item()
+            # cp = cost_pitch.mean().item()
+            # print(f"cost_goal={cg:.2f}  cost_pitch={cp:.2f}  ratio={cp/max(cg,1e-9):.3f}")
 
-            theta_soft = 80.0
-            theta_max = 85.0
-            q_flip = 2000.0
-            #q_climb = 
-
-            # # 3) smooth flip barrier: ~0 while |pitch| < theta_soft, then rises steeply (4th
-            # #    power) past it -- discourages big pitch WITHOUT a hard cliff. q_flip = strength.
-            # over_soft = torch.clamp(theta ** 2 - theta_soft ** 2, min=0.0)   # >0 once |theta|>theta_soft
-            # cost_flip = q_flip * over_soft ** 2       # q_flip   : discourage rearing past theta_soft
-
-            # # 5) hard tip-over wall: forbid |pitch| beyond theta_max with a big flat cost
-            # cost_wall = torch.where(theta.abs() > theta_max,
-            #                         torch.full_like(theta, 1e4), torch.zeros_like(theta))  # theta_max
-
-            return cost_goal #+ cost_pitch #+ cost_smooth + cost_torque + cost_flip + cost_wall
+            return cost_goal + cost_pitch
 
     
     # ---- the controller: state in -> action out ---------------------------
@@ -237,7 +199,7 @@ class MPPITorch:
     #   3. weight them  w^m = exp(-J^m/lambda) / sum_j exp(-J^j/lambda)      (3),(4)
     #   4. update  U* = U_nom + sum_m w^m eps^m,  apply the first action     (5)
     @torch.no_grad()
-    def solve(self, state, ref, tau_prev):
+    def solve(self, state, ref, tau_prev, a_rls):
         p, cfg, dev = self.p, self.cfg, self.device
         # k=Samples, N=Horizon, dt=Sample time
         K, N, dt = self.K, int(cfg.N), float(cfg.dt)
@@ -275,13 +237,9 @@ class MPPITorch:
             s = self._step(s, tau, dt)                                        # x_{n+1} = F(x_n, u_n)
             prev = tau
         
-        # Terminal Cost e[:,0]=x, e[:,1]=vel, e[:,2]=theta, e[:,2]=omega
-        e = s - ref           
-        terminal_cost_x = cfg.q_terminal_x * e[:, 0]**2                                                  # terminal cost phi(x_N)
-        terminal_cost_theta = cfg.q_terminal_theta * e[:, 2]**2
-        terminal_cost_omega = cfg.q_terminal_omega * e[:, 3]**2
-
-        J = J + terminal_cost_x + terminal_cost_theta #+ terminal_cost_omega
+        # Terminal Cost
+        e = s - ref                                                             # terminal cost phi(x_N)
+        J = J + cfg.q_x * e[:, 0]**2 + cfg.q_theta * e[:, 2]**2
         # J = J + (cfg.q_x * e[:, 0]**2 + cfg.q_v * e[:, 1]**2
         #          + cfg.q_theta * e[:, 2]**2 + cfg.q_omega * e[:, 3]**2)
         J = torch.nan_to_num(J, nan=1e12, posinf=1e12, neginf=1e12)
