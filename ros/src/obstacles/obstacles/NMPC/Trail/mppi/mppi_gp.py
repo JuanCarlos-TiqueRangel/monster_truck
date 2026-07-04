@@ -3,7 +3,10 @@
 import math
 import torch
 from params_mppi import MPPIConfig
-
+import matplotlib.pyplot as plt
+import numpy as np
+from types import SimpleNamespace
+from nominal_model import M, R, G, RHO, ALPHA, I_A, C_OMEGA, KV, CV
 
 class MPPITorch:
     # same sampler settings as the numba mppi.py so behaviour is comparable
@@ -12,12 +15,7 @@ class MPPITorch:
     LAM = MPPIConfig.LAM           # temperature (softmin sharpness)
     SEED = MPPIConfig.SEED
 
-    def __init__(self, p, cfg, gp, device=None, fast=True, integrator="euler", dtype=None):
-        """fast=True  -> GP residual via the cached kernel MATMUL (gp.predict_torch_fast),
-                         float32, no gpytorch forward in the loop -> MUCH faster.
-           fast=False -> calls gp.predict_torch (the GPyTorch model directly), double; the
-                         clean-but-slow reference path.
-           integrator -> "euler" (1 GP eval/step, default) or "rk4" (4 GP evals/step)."""
+    def __init__(self, p, cfg, gp, device=None, fast=True, integrator="euler", dtype=None, live_plot=False):
 
         self.p = p
         self.cfg = cfg
@@ -25,7 +23,7 @@ class MPPITorch:
         self.fast = bool(fast)
         self.integrator = str(integrator).lower()
         self.dtype = dtype if dtype is not None else (torch.float32 if fast else torch.double)
-        self.device = torch.device(device if device is not None else getattr(gp, "device", "cpu"))
+        self.device = torch.device("cuda")
         # risk-averse weight on the GP's epistemic uncertainty (0 = off). >0 penalizes
         # planning into regions the GP has NOT learned (needs gp.predict_uncertainty_torch).
         self.q_gp_var = float(getattr(cfg, "q_gp_var", 0.0))
@@ -36,136 +34,161 @@ class MPPITorch:
         self.gen = torch.Generator(device=self.device)
         self.gen.manual_seed(self.SEED)
 
-    # ---- dynamics: RLS nominal + GP residual (the SAME model as mppi.py) ---
-    def _deriv(self, s, tau, a):
-
-        x, v, th, om = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
-        X = torch.stack([x, v, th, om, tau], dim=-1)     # (K,5) feature z=[x,v,theta,omega,tau]
-        if self.fast:                                    # cached kernel matmul (fast, float32)
-            res_v, res_w = self.gp.predict_torch_fast(X, dtype=self.dtype)
-        else:                                            # GPyTorch model forward (slow, double)
-            res_v, res_w = self.gp.predict_torch(X)
-
-        # DYNAMIC MODEL
-        # x_dot = v
-        # v_dot = (a[0] * tau + a[1] * v + a[2] * v.abs() * v + a[3] * tau * (torch.cos(th)) + a[4] + res_v)
-        # th_dot = om
-        # om_dot = (a[5] * torch.cos(th) + a[6] * tau + a[7] * om + a[8] * v + a[9] + res_w)
-        
-        # x_dot = v
-        # v_dot = (a[0] * tau
-        #          + a[1] * v 
-        #          + a[2] * v.abs() * v
-        #          + a[3] * tau * (torch.cos(th))
-        #          + a[4] * torch.tanh(v/0.05)
-        #          + a[5] * om**2 * (torch.cos(th))
-        #          + a[6] 
-        #          + res_v)
-        
-        # th_dot = om
-        
-        # om_dot = (a[7] * torch.cos(th) 
-        #           + a[8] * tau 
-        #           + a[9] * om
-        #           + a[10] * v 
-        #           + a[11] * abs(om) * om
-        #           + a[12] * v * om
-        #           + a[13] * abs(v) * om
-        #           + a[14] * torch.cos(th) * om
-        #           + a[15] * torch.sin(th) * v
-        #           + a[16] * torch.sin(th)
-        #           + a[17] * torch.cos(th) * tau
-        #           + a[18] * tau * v
-        #           + a[19]
-        #           + res_w) 
-
-        # x_dot = v
-
-        # v_dot = (a[0] * tau
-        #          + a[1] * v 
-        #          + a[2] * tau * (torch.cos(th))
-        #          + a[3] 
-        #          + res_v)
-        
-        # th_dot = om
-        
-        # om_dot = (a[4] * torch.cos(th) 
-        #           + a[5] * tau 
-        #           + a[6] * om
-        #           + a[7] * v 
-        #           + a[8]
-        #           + res_w) 
-
-        x_dot = v
-        v_dot = tau/(5.1 * 0.081) + res_v
-        th_dot = om
-        om_dot = ((-tau + 5.1*9.81*0.2*torch.cos(th))/((1.0 / 12.0) * 5.1 * (0.53**2 + 0.30**2))) + res_w
-
-        return torch.stack([x_dot, v_dot, th_dot, om_dot], dim=-1)
-
-    def _step(self, s, tau, a, dt):
-        if self.integrator == "rk4":                     # 4 GP evals/step (matches numba mppi.py)
-            k1 = self._deriv(s, tau, a)
-            k2 = self._deriv(s + 0.5 * dt * k1, tau, a)
-            k3 = self._deriv(s + 0.5 * dt * k2, tau, a)
-            k4 = self._deriv(s + dt * k3, tau, a)
-            s = s + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-        else:                                            # euler: 1 GP eval/step (4x fewer)
-            s = s + dt * self._deriv(s, tau, a)
-        # same clamps as the numba rollout (keep diverging samples finite)
-        s = torch.stack([s[:, 0],
-                         s[:, 1].clamp(-10.0, 10.0),
-                         s[:, 2],
-                         s[:, 3].clamp(-30.0, 30.0)], dim=-1)
-        return s
+        # Plot
+        # --- live plan plot (optional; one figure, updated each solve) ---
+        self.live_plot = bool(live_plot)     # draw the planned-trajectory figure each solve
+        self.plot_obstacle_span = None       # (x0, x1) to shade an obstacle in x; None = no shade
+        self._plot = None                    # figure + line handles, built lazily on first draw
+        self._plot_off = False               # set True if matplotlib/display is unavailable
 
 
+    def _plot_plan(self, s0, U, S, U_opt, dt, ref, n_best=50):
+        if self._plot_off:
+            return
+        try:
+            N = int(U.shape[1])
+
+            with torch.no_grad():
+                # n_best cheapest sampled rollouts (one batched re-roll)
+                idx = torch.argsort(S)[:n_best]
+                sb = s0.unsqueeze(0).repeat(idx.numel(), 1)
+                xs, ths = [sb[:, 0].clone()], [sb[:, 2].clone()]
+                
+                for n in range(N):
+                    sb = self._step(sb, U[idx, n], dt)
+                    xs.append(sb[:, 0].clone()); ths.append(sb[:, 2].clone())
+                
+                xs = torch.stack(xs, 1).cpu().numpy()
+                ths = np.degrees(torch.stack(ths, 1).cpu().numpy())
+
+                # the optimal plan
+                so = s0.unsqueeze(0)
+                xo, tho = [so[:, 0].clone()], [so[:, 2].clone()]
+
+                for n in range(N):
+                    so = self._step(so, U_opt[n:n + 1], dt)
+                    xo.append(so[:, 0].clone()); tho.append(so[:, 2].clone())
+                
+                xo = torch.stack(xo, 1).cpu().numpy().ravel()
+                tho = np.degrees(torch.stack(tho, 1).cpu().numpy().ravel())
+
+            if self._plot is None:                 # first call: build the figure once
+                self._plot_setup(plt, ref, n_best)
+            pl = self._plot
+
+            for line, x, t in zip(pl.samples, xs, ths):
+                line.set_data(x, t)
+            pl.opt.set_data(xo, tho)
+
+            # realized trail = the true (x, theta) the truck has passed through. s0 each
+            # solve IS the current real state; a big backward jump in x = episode reset.
+            xr, tr = float(s0[0]), math.degrees(float(s0[2]))
+            if pl.trail_x and pl.trail_x[-1] - xr > 0.5:
+                pl.trail_x.clear(); pl.trail_t.clear()
+            pl.trail_x.append(xr); pl.trail_t.append(tr)
+            pl.trail.set_data(pl.trail_x, pl.trail_t)
+            pl.car.set_data([xr], [tr])            # blue circle = current (x, theta)
+
+            pl.fig.canvas.draw_idle(); pl.fig.canvas.flush_events()
+            plt.pause(0.001)
+        except Exception as exc:                   # no display / matplotlib -> disable, don't crash
+            print(f"[plot_plan] disabled ({exc})")
+            self._plot_off = True
+
+    def _plot_setup(self, plt, ref, n_best):
+        """Build the persistent figure and empty line artists (called once, on first draw)."""
+        goal_x = float(ref[0])
+        plt.ion()
+        fig, ax = plt.subplots()
+        ax.set(xlabel="x [m]", ylabel="theta [deg]",
+               xlim=(-2.0, 10 + 2.0), ylim=(-120, 120),
+               title="MPPI planned trajectories (x vs theta)")
+        if self.plot_obstacle_span is not None:
+            ax.axvspan(*self.plot_obstacle_span, color="0.85", zorder=0)
+        ax.grid(True, alpha=0.3)
+        samples = [ax.plot([], [], color="0.7", lw=0.6, alpha=0.5)[0] for _ in range(n_best)]
+        opt,   = ax.plot([], [], "C3-o", lw=2.0, ms=3, label="optimal plan")
+        trail, = ax.plot([], [], "C0-",  lw=1.3, alpha=0.85, label="realized")
+        car,   = ax.plot([], [], "o", ms=12, mfc="blue", mec="k", mew=1.0, zorder=5, label="car")
+        ax.legend(loc="upper left")
+        self._plot = SimpleNamespace(fig=fig, ax=ax, samples=samples, opt=opt,
+                                     trail=trail, car=car, trail_x=[], trail_t=[])
+
+    def _deriv(self, s, tau):
+
+            x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
+
+            if self.gp is not None:
+                X = torch.stack([x, v, theta, omega, tau], dim=-1)
+                res_v, res_w = self.gp.predict_torch_fast(X, dtype=self.dtype)
+            else:
+                res_v = res_w = torch.zeros_like(v)
+
+            beta = ALPHA - theta
+            lever_drive = R + RHO * torch.sin(beta)
+            lever_gravity = RHO * torch.cos(beta)
+            omega_dot = (-(tau / R) * lever_drive + M * G * lever_gravity) / I_A \
+                        - C_OMEGA * omega
+            on_ground = (theta >= 0.0) & (omega_dot > 0.0)
+            omega_dot = torch.where(on_ground, torch.zeros_like(omega_dot), omega_dot)
+            omega_dot = omega_dot + res_w        # residual AFTER the clamp = nominal_model + r
+
+            x_dot = v
+            v_dot = KV * tau - CV * v + res_v
+            theta_dot = omega
+            return torch.stack([x_dot, v_dot, theta_dot, omega_dot], dim=-1)
 
 
-
-    # def _stage_cost(self, s, tau, tau_prev, ref, c):
-    #     # state   s   = [x, v, theta, omega]
-    #     # ref         = [x_goal, v_ref, theta_ref, omega_ref]
+    # # ---- dynamics: nominal dynamics  ---
+    # def _deriv(self, s, tau):
     #     x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
 
-    #     # 1) tracking errors (state - reference)
-    #     e_x      = x     - ref[0]        # how far from the goal position
-    #     e_v      = v     - ref[1]        # speed error
-    #     e_theta  = theta - ref[2]        # pitch error
-    #     e_omega  = omega - ref[3]        # pitch-rate error
-    #     d_tau    = tau   - tau_prev      # torque change since last step
+    #     if self.gp is not None:
+    #         X = torch.stack([x, v, theta, omega, tau], dim=-1)
+    #         res_v, res_w = self.gp.predict_torch_fast(X, dtype=self.dtype)
+    #     else:
+    #         res_v = res_w = torch.zeros_like(v)
 
-    #     # 2) quadratic tracking / effort penalties  (weight * error^2)
-    #     cost_goal       = c["q_x"]    * e_x ** 2       # q_x     : reach the goal position
-    #     cost_speed      = c["q_v"]    * e_v ** 2       # q_v     : hold the reference speed
-    #     cost_pitch      = c["q_th"]   * e_theta ** 2   # q_theta : keep pitch near reference (stay flat)
-    #     cost_pitch_rate = c["q_om"]   * e_omega ** 2   # q_omega : damp the pitch rate
-    #     cost_torque     = c["r_tau"]  * tau ** 2       # r_tau   : use less torque
-    #     cost_smooth     = c["r_dtau"] * d_tau ** 2     # r_dtau  : avoid jerky torque changes
+    #     m = 5.1
+    #     r = 0.081
+    #     g = 9.81
+    #     l = 0.2
+    #     L_car = 0.53
+    #     H_body = 0.30
 
-    #     # 3) smooth flip barrier: ~0 while |pitch| < theta_soft, then rises steeply (4th
-    #     #    power) past it -- discourages big pitch WITHOUT a hard cliff. q_flip = strength.
-    #     over_soft = torch.clamp(theta ** 2 - c["th_soft"] ** 2, min=0.0)   # >0 once |theta|>theta_soft
-    #     cost_flip = c["q_flip"] * over_soft ** 2       # q_flip   : discourage rearing past theta_soft
+    #     I_body = (1.0 / 12.0) * m * (L_car**2 + H_body**2)
+    #     I_eff = I_body + m * l**2
 
-    #     # 4) climb-rate barrier: one-sided -- only when ALREADY past theta_climb AND still
-    #     #    pitching up (omega>0). Penalizes rearing further. q_flipw = strength.
-    #     rearing    = (theta - c["th_climb"] > 0.0) & (omega > 0.0)
-    #     cost_climb = c["q_flipw"] * torch.where(rearing, (theta - c["th_climb"]) * omega,
-    #                                             torch.zeros_like(theta))   # q_flipw : stop over-rearing
+    #     omega_dot = ((-tau + m * g * l * torch.cos(theta)) / I_eff) 
+    #     on_ground = (theta >= 0.0) & (omega_dot > 0.0)
+    #     omega_dot = torch.where(on_ground, torch.zeros_like(omega_dot), omega_dot)
+    #     omega_dot = omega_dot + res_w
 
-    #     # 5) hard tip-over wall: forbid |pitch| beyond theta_max with a big flat cost
-    #     cost_wall = torch.where(theta.abs() > c["th_max"],
-    #                             torch.full_like(theta, 1e4), torch.zeros_like(theta))  # theta_max
+    #     x_dot = v
+    #     v_dot = (tau / (m * r)) + res_v
+    #     theta_dot = omega
 
-    #     #return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate + cost_torque)
-
-    #     #return cost_goal + cost_pitch*100
-
-    #     return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate + cost_torque
-    #             + cost_smooth + cost_flip + cost_climb + cost_wall)
+    #     return torch.stack([x_dot, v_dot, theta_dot, omega_dot], dim=-1)
 
 
+    def _step(self, s, tau, dt):
+        if self.integrator == "rk4":                     
+            k1 = self._deriv(s, tau)
+            k2 = self._deriv(s + 0.5 * dt * k1, tau)
+            k3 = self._deriv(s + 0.5 * dt * k2, tau)
+            k4 = self._deriv(s + dt * k3, tau)
+            s = s + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+        else:                                            # euler: 1 GP eval/step (4x fewer)
+            s = s + dt * self._deriv(s, tau)
+
+        landing = (s[:, 2] >= 0.0) & (s[:, 3] > 0.0)
+        s = torch.stack([s[:, 0],
+                        s[:, 1].clamp(-10.0, 10.0),
+                        s[:, 2].clamp(max=0.0),
+                        torch.where(landing, torch.zeros_like(s[:, 3]), s[:, 3].clamp(-30.0, 30.0))],
+                        dim=-1)
+
+        return s
 
 
     def _stage_cost(self, s, tau, tau_prev, ref):
@@ -178,77 +201,67 @@ class MPPITorch:
             e_omega = omega - ref[3]      # pitch-rate error
             d_tau   = tau   - tau_prev    # torque change since last step
 
+            theta_deg = torch.rad2deg(theta)
+            e_theta_deg = theta_deg - ref[2]
+
             cost_goal       = cfg.q_x     * e_x     ** 2
             cost_speed      = cfg.q_v     * e_v     ** 2
             cost_pitch      = cfg.q_theta * e_theta ** 2
+            #cost_pitch      = cfg.q_theta * e_theta_deg ** 2
             cost_pitch_rate = cfg.q_omega * e_omega ** 2
             cost_torque     = cfg.r_tau   * tau     ** 2
             cost_smooth     = cfg.r_dtau  * d_tau   ** 2
 
-            return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate + cost_torque)
 
-            # # smooth flip barrier: ~0 until |pitch| > theta_soft, then rises steeply
-            # over_soft = torch.clamp(theta ** 2 - self.theta_soft ** 2, min=0.0)
-            # cost_flip = cfg.q_flip * over_soft ** 2
+            theta_soft = 80.0
+            theta_max = 85.0
+            q_flip = 2000.0
+            #q_climb = 
 
-            # # one-sided climb barrier: only past theta_climb AND still pitching up
-            # rearing    = (theta - self.theta_climb > 0.0) & (omega > 0.0)
-            # cost_climb = self.q_flipw * torch.where(rearing,
-            #                                         (theta - self.theta_climb) * omega,
-            #                                         torch.zeros_like(theta))
+            # # 3) smooth flip barrier: ~0 while |pitch| < theta_soft, then rises steeply (4th
+            # #    power) past it -- discourages big pitch WITHOUT a hard cliff. q_flip = strength.
+            # over_soft = torch.clamp(theta ** 2 - theta_soft ** 2, min=0.0)   # >0 once |theta|>theta_soft
+            # cost_flip = q_flip * over_soft ** 2       # q_flip   : discourage rearing past theta_soft
 
-            # # hard tip-over wall
-            # cost_wall = torch.where(theta.abs() > p.theta_max,
-            #                         torch.full_like(theta, 1e4),
-            #                         torch.zeros_like(theta))
+            # # 5) hard tip-over wall: forbid |pitch| beyond theta_max with a big flat cost
+            # cost_wall = torch.where(theta.abs() > theta_max,
+            #                         torch.full_like(theta, 1e4), torch.zeros_like(theta))  # theta_max
 
-            #     #return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate + cost_torque)
+            return cost_goal #+ cost_pitch #+ cost_smooth + cost_torque + cost_flip + cost_wall
 
-            #     #return cost_goal + cost_pitch*100
-
-            # return (cost_goal + cost_speed + cost_pitch + cost_pitch_rate
-            #         + cost_torque + cost_smooth + cost_flip + cost_climb + cost_wall)
     
-
-
-    # ------------------------------------------------------------------ #
-    # Risk term (optional, weight q_gp_var): penalize planning into states the GP has
-    # NOT learned. The GP returns a per-channel epistemic uncertainty in [0,1] (0 = on
-    # the learned data, 1 = unmodelled). Added to the cost so the planner prefers states
-    # the model trusts -- and while learning, collects data at the edge of the known
-    # region instead of diving into the unknown (and flipping). Kept SEPARATE from
-    # _stage_cost: that is the deterministic cost, this is the uncertainty cost.
-    # ------------------------------------------------------------------ #
-    def _risk(self, s, tau):
-        X = torch.stack([s[:, 0], s[:, 1], s[:, 2], s[:, 3], tau], dim=-1)   # (K,5)
-        u_v, u_w = self.gp.predict_uncertainty_torch(X, dtype=self.dtype)
-        return u_v + u_w                                  # each in [0,1]; weight applied by caller
-
     # ---- the controller: state in -> action out ---------------------------
-# ---- the controller: state in -> action out ---------------------------
     #  Information-theoretic MPPI:
     #   1. sample K control sequences   V^m = U_nom + eps^m,  eps^m ~ N(0, sigma^2) i.i.d.
     #   2. roll each through F, summing the cost J(X^m, V^m)                 (1),(2)
     #   3. weight them  w^m = exp(-J^m/lambda) / sum_j exp(-J^j/lambda)      (3),(4)
     #   4. update  U* = U_nom + sum_m w^m eps^m,  apply the first action     (5)
     @torch.no_grad()
-    def solve(self, state, ref, tau_prev, a_rls):
+    def solve(self, state, ref, tau_prev):
         p, cfg, dev = self.p, self.cfg, self.device
+        # k=Samples, N=Horizon, dt=Sample time
         K, N, dt = self.K, int(cfg.N), float(cfg.dt)
-        lam, sigma = float(self.LAM), float(self.SIGMA)      # temperature, exploration std
+        # lam=temperature, sigma=exploration std
+        lam, sigma = float(self.LAM), float(self.SIGMA)
         tau_min, tau_max = float(p.tau_min), float(p.tau_max)
         tau_prev = float(tau_prev)
 
         s0  = torch.as_tensor(state, dtype=self.dtype, device=dev).reshape(-1)   # (4,)
         ref = torch.as_tensor(ref,   dtype=self.dtype, device=dev).reshape(-1)   # (4,)
-        a   = torch.as_tensor(a_rls, dtype=self.dtype, device=dev).reshape(-1)   # dynamics params
+
+        # receding waypoint: track a point ~one horizon ahead, capped at the goal.
+        # bounds cost magnitude -> lambda/sigma stay valid at any goal distance.
+        # ref= [xpos, velocity, pitch, pitch_dot]
+        LOOKAHEAD = 6.0                                   # ~ v_max * N * dt [m]
+        ref = ref.clone()
+        ref[0] = torch.minimum(ref[0], s0[0] + LOOKAHEAD)
 
         # 1. sample K control sequences around the warm-started nominal
         U_nom = self._warm_start(N, tau_prev)                                    # (N,)  u_t
         eps = sigma * torch.randn(K, N, generator=self.gen,
-                                  dtype=self.dtype, device=dev)                  # (K,N) ~ N(0, sigma^2)
+                                  dtype=self.dtype, device=dev)                # (K,N) ~ N(0, sigma^2)
         U = torch.clamp(U_nom.unsqueeze(0) + eps, tau_min, tau_max)             # (K,N) V^m
-        eps = U - U_nom.unsqueeze(0)                                            # effective noise after clamp
+        eps = U - U_nom.unsqueeze(0)                                          # effective noise after clamp
 
         # 2. roll every sequence through the dynamics and accumulate its cost J
         s = s0.unsqueeze(0).repeat(K, 1)                                         # (K,4) all start at x_0
@@ -259,12 +272,16 @@ class MPPITorch:
         for n in range(N):
             tau = U[:, n]                                                        # u_n for every sample
             J = J + self._stage_cost(s, tau, prev, ref)                       # running cost l(x_n, u_n)
-            s = self._step(s, tau, a, dt)                                        # x_{n+1} = F(x_n, u_n)
+            s = self._step(s, tau, dt)                                        # x_{n+1} = F(x_n, u_n)
             prev = tau
         
-        # Terminal Cost
-        e = s - ref                                                             # terminal cost phi(x_N)
-        J = J + cfg.q_x * e[:, 0]**2
+        # Terminal Cost e[:,0]=x, e[:,1]=vel, e[:,2]=theta, e[:,2]=omega
+        e = s - ref           
+        terminal_cost_x = cfg.q_terminal_x * e[:, 0]**2                                                  # terminal cost phi(x_N)
+        terminal_cost_theta = cfg.q_terminal_theta * e[:, 2]**2
+        terminal_cost_omega = cfg.q_terminal_omega * e[:, 3]**2
+
+        J = J + terminal_cost_x + terminal_cost_theta #+ terminal_cost_omega
         # J = J + (cfg.q_x * e[:, 0]**2 + cfg.q_v * e[:, 1]**2
         #          + cfg.q_theta * e[:, 2]**2 + cfg.q_omega * e[:, 3]**2)
         J = torch.nan_to_num(J, nan=1e12, posinf=1e12, neginf=1e12)
@@ -278,65 +295,24 @@ class MPPITorch:
         U_opt = torch.clamp(U_nom + (w.unsqueeze(1) * eps).sum(0), tau_min, tau_max)
         self.last_solution = U_opt                                              # warm start next call
 
-        if self.plot_hook is not None:
-            self.plot_hook(self, s0, U, J, U_opt, a, dt)
-        return float(U_opt[0].item()), {"success": True, "cost": float(rho.item())}
+        # ess = 1.0 / (w ** 2).sum()
+        # print(f"ESS = {ess.item():.0f} / {K}")
+
+        # good = J[J < J.median()]                      # the samples that actually get weight
+        # spread = (good.max() - good.min()).item()
+        # ess = 1.0 / (w ** 2).sum()
+        # print(f"J_min={rho.item():.0f}  spread={spread:.0f}  J_max={J.max().item():.0f}  ESS={ess.item():.0f}/{K}")
+
+        if self.live_plot:
+            self._plot_plan(s0, U, J, U_opt, dt, ref)
+
+        U_opt = float(U_opt[0].item())
+        info = {"success": True, "cost": float(rho.item())}
+
+        #return float(U_opt[0].item()), {"success": True, "cost": float(rho.item())}
+        return U_opt, info
 
     def _warm_start(self, N, tau_prev):
         if self.last_solution is None:
             return torch.full((N,), tau_prev, dtype=self.dtype, device=self.device)
         return torch.cat([self.last_solution[1:], self.last_solution[-1:]])
-
-
-# ============================================================================ #
-# Smoke test: fit a GP on synthetic data, then run one MPPI solve and confirm it
-# returns a finite torque. Runs on the host (CPU). No mujoco needed.
-#   python3 mppi_torch.py
-# ============================================================================ #
-if __name__ == "__main__":
-    import sys
-    from pathlib import Path
-    import numpy as np
-
-    _here = Path(__file__).resolve().parent
-    sys.path.insert(0, str(_here / ".." / "gp"))         # for GP
-    sys.path.insert(0, str(_here))                       # for params_mppi
-
-    from params_mppi import WheelieParams, MPPIConfig
-    from GP import GPConfig
-
-    rng = np.random.default_rng(0)
-    X = np.stack([rng.uniform(0, 6, 400), rng.uniform(0, 4, 400),
-                  rng.uniform(-0.3, 1.2, 400), rng.uniform(-2, 2, 400),
-                  rng.uniform(-5, 10, 400)], axis=1)
-    obstacle = np.exp(-((X[:, 0] - 3.0) ** 2) / (2 * 0.25 ** 2))
-    Y = np.stack([-3.0 * obstacle, 6.0 * obstacle], axis=1) + rng.normal(0, 0.05, (400, 2))
-
-    gp = GPConfig(max_points=50, n_iter_fit=120, device="cpu").build()
-    for z, y in zip(X, Y):
-        gp.observe(z, y[0], y[1])
-    gp.end_episode()
-
-    import time
-    p, cfg = WheelieParams(), MPPIConfig()
-    ref = np.array([10.0, 0.0, 0.0, 0.0])
-    state = np.array([0.0, 0.0, 0.0, 0.0])
-    a0 = np.zeros(10)
-
-    def bench(name, **kw):
-        ctrl = MPPITorch(p, cfg, gp, device="cpu", **kw)
-        ctrl.solve(state, ref, 0.0, a0)                  # warmup (build caches)
-        t0 = time.perf_counter()
-        tau = 0.0
-        for _ in range(20):
-            tau, info = ctrl.solve(state, ref, tau, a0)
-        ms = (time.perf_counter() - t0) / 20 * 1e3
-        print(f"{name:28s} {ms:7.2f} ms/solve   last tau={tau:+.4f}")
-        return tau
-
-    bench("FAST (matmul, f32, euler)", fast=True, integrator="euler")
-    bench("FAST (matmul, f32, rk4)", fast=True, integrator="rk4")
-    bench("SLOW (gpytorch, f64, rk4)", fast=False, integrator="rk4")
-    print("OK: the fast matmul GP prediction equals the GPyTorch model to ~1e-5 (the GP is\n"
-          "    identical); the much lower ms/solve is the win. tau differs across rows only\n"
-          "    because of the integrator (euler vs rk4) and dtype-dependent RNG draws.")

@@ -171,11 +171,6 @@ class MPPITorch:
             s = s + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
         else:                                            # euler: 1 GP eval/step (4x fewer)
             s = s + dt * self._deriv(s, tau)
-        # same clamps as the numba rollout (keep diverging samples finite)
-        # s = torch.stack([s[:, 0],
-        #                  s[:, 1].clamp(-10.0, 10.0),
-        #                  s[:, 2],
-        #                  s[:, 3].clamp(-30.0, 30.0)], dim=-1)
 
         landing = (s[:, 2] >= 0.0) & (s[:, 3] > 0.0)
         s = torch.stack([s[:, 0],
@@ -279,10 +274,10 @@ class MPPITorch:
         # ess = 1.0 / (w ** 2).sum()
         # print(f"ESS = {ess.item():.0f} / {K}")
 
-        good = J[J < J.median()]                      # the samples that actually get weight
-        spread = (good.max() - good.min()).item()
-        ess = 1.0 / (w ** 2).sum()
-        print(f"J_min={rho.item():.0f}  spread={spread:.0f}  J_max={J.max().item():.0f}  ESS={ess.item():.0f}/{K}")
+        # good = J[J < J.median()]                      # the samples that actually get weight
+        # spread = (good.max() - good.min()).item()
+        # ess = 1.0 / (w ** 2).sum()
+        # print(f"J_min={rho.item():.0f}  spread={spread:.0f}  J_max={J.max().item():.0f}  ESS={ess.item():.0f}/{K}")
 
         if self.live_plot:
             self._plot_plan(s0, U, J, U_opt, dt, ref)

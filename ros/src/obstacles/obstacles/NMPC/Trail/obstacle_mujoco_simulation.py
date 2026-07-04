@@ -24,9 +24,10 @@ CONTROLLER = "mppi"          # "nmpc" or "mppi"
 if CONTROLLER == "mppi":
     from params_mppi import WheelieParams, MPPIConfig as ControllerConfig
 
-    #from mppi_gp import MPPITorch as Controller
-    from mppi_dynamics import MPPITorch as Controller
+    # from mppi_dynamics import MPPITorch as Controller
     # from mppi_rls import MPPITorch as Controller
+    #from mppi_gp import MPPITorch as Controller
+    from mppi_rls_gp import MPPITorch as Controller
 elif CONTROLLER == "nmpc":
     from params_nmpc import WheelieParams, MPCConfig as ControllerConfig
     from nmpc import NMPC as Controller
@@ -48,7 +49,7 @@ RESULTS_DIR.mkdir(exist_ok=True)
 CSV_PATH = RESULTS_DIR / "obstacle_mujoco.csv"
 MODEL_PATH = RESULTS_DIR / "obstacle_model.npz"
 
-RENDER   = True       # True = watch the truck; False = fast headless run
+RENDER   = False       # True = watch the truck; False = fast headless run
 CTRL_DT  = 0.05       # control / MPPI period [s]
 INIT_Z   = 0.1512     # spawn height
 SIM_TIME = 20.0       # per-episode time cap [s]
@@ -56,7 +57,7 @@ PRINT_EVERY_N_CONTROLS = 1
 
 # Episodic learning: the GP (and RLS) persist across episodes, the MuJoCo state is
 # reset each episode. Episode 1 learns where the obstacle is; episode 2 reuses that.
-N_EPISODES = 2
+N_EPISODES = 20
 
 # GP settings
 LOAD_MODEL = False    # True = RESUME from a saved model (GP posterior + RLS state)
@@ -254,8 +255,12 @@ class ObstacleNode:
         # Build the selected controller. The MPPI holds the BUILT gp object (and takes an
         # integrator); the NMPC takes the gp CONFIG and gets the GP via gp_params each solve.
         if CONTROLLER == "mppi":
-            self.controller = Controller(self.p, self.cfg, self.gp, integrator="rk4",
-                                         live_plot=(LIVE_PLOT and RENDER))
+            # self.controller = Controller(self.p, self.cfg, self.gp, integrator="rk4",
+            #                              live_plot=(LIVE_PLOT and RENDER))
+            
+            self.controller = Controller(self.p, self.cfg, self.gp,
+                             live_plot=(LIVE_PLOT and RENDER))
+            
             self.controller.plot_obstacle_span = (1.7, 2.3)   # obstacle x-span shaded in the plan plot
         else:  # nmpc
             self.controller = Controller(self.p, self.cfg, self.gp_cfg)
@@ -271,7 +276,7 @@ class ObstacleNode:
         # The unique MPPI reference: reach the goal (v_ref=0 so it stops there; the
         # theta/omega entries are ignored because their cost weights are 0).
         # references = [xpos, velocity, theta, theta_dot]
-        self.ref = np.array([GOAL_X, 0.0, -1.22, 0.0], dtype=float)
+        self.ref = np.array([GOAL_X, 0.0, 0.0, 0.0], dtype=float)
 
         # Optionally RESUME from a previously saved model (GP posterior + RLS state).
         if LOAD_MODEL and MODEL_PATH.exists():
