@@ -56,28 +56,27 @@ class MPPIConfig:
     # SEED: int = 0
 
     dt: float = 0.05
-    N: int = 25
+    N: int = 40
 
     # Stage/Running cost weights 
-    q_x: float = 5.0
-    q_v: float = 0.0
-    q_theta: float = 15.0
-    q_omega: float = 0.0
-    r_tau: float = 0.5
-    r_dtau: float = 5.5
+    q_x: float = 1.0
+    q_v: float = 5.0
+    q_theta: float = 5.0
+    q_omega: float = 0.5
+    r_tau: float = 0.01
+    r_dtau: float = 0.05
 
     # Terminal cost weights
+    q_progress = 100.0
     q_terminal_x = 2.1
-    q_terminal_theta: float = 15.0
+    q_terminal_theta: float = 0.0
     q_terminal_omega: float = 0.0
     ipopt_max_iter: int = 50
-    # q_flip: float = 2000.0
-    # theta_soft_deg: float = 80.0
+
     q_gp_var: float = 0.0
     K: int = 4096            # number of sampled rollouts
-    SIGMA: float = 2.0        # exploration std on tau
-    LAM: float = 0.1           # temperature (softmin sharpness)
-    SEED: int = 0
+    SIGMA: float = 20.0        # exploration std on tau
+    LAM: float = 1.6           # temperature (softmin sharpness)
 
 
 @dataclass
