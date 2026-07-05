@@ -23,11 +23,7 @@ CONTROLLER = "mppi"          # "nmpc" or "mppi"
 
 if CONTROLLER == "mppi":
     from params_mppi import WheelieParams, MPPIConfig as ControllerConfig
-
-    # from mppi_dynamics import MPPITorch as Controller
-    # from mppi_rls import MPPITorch as Controller
     from mppi_gp import MPPITorch as Controller
-    # from mppi_rls_gp import MPPITorch as Controller
 elif CONTROLLER == "nmpc":
     from params_nmpc import WheelieParams, MPCConfig as ControllerConfig
     from nmpc import NMPC as Controller
@@ -35,7 +31,6 @@ else:
     raise ValueError(f"CONTROLLER must be 'mppi' or 'nmpc', got {CONTROLLER!r}")
 
 from GP import GPConfig as SSGPConfig   # GPyTorch sparse GP residual model (shared by both)
-from nominal_model import nominal_accel
 
 
 # ============================================================
@@ -57,20 +52,13 @@ PRINT_EVERY_N_CONTROLS = 1
 
 # Episodic learning: the GP (and RLS) persist across episodes, the MuJoCo state is
 # reset each episode. Episode 1 learns where the obstacle is; episode 2 reuses that.
-N_EPISODES = 4000
+N_EPISODES = 50
 
 # GP settings
 LOAD_MODEL = False    # True = RESUME from a saved model (GP posterior + RLS state)
 GP_ENABLED = True     # False = ZERO the GP's contribution (RLS-only control; GP still learns/logs)
 
 LIVE_PLOT = True          # True = live X-vs-theta plot of the MPPI plan while the sim runs
-
-# RLS settings. RLS_FREEZE=True holds a_rls at the nominal physics values
-RLS_FREEZE = True
-FORGETTING_FACTOR = 0.9995   # < 1 keeps the fit adaptive
-INITIAL_COVARIANCE = 3.0     # prior uncertainty on the weights
-SIGMA_V_DOT = 2.0            # measurement-noise std, v_dot channel
-SIGMA_OMEGA_DOT = 5.0        # measurement-noise std, omega_dot channel
 
 # Outlier gate: skip a step if the measured accel is bigger than this (contact impact).
 ACCEL_CAP_V = 15.0           # m/s^2
@@ -83,46 +71,6 @@ GOAL_TOL = 0.15          # an episode ends early once |x - GOAL_X| < GOAL_TOL
 INITIAL_X = 0.0
 INITIAL_Z = INIT_Z
 INITIAL_ROOT_PITCH_DEG = 0.0
-
-# The 10 weight names, in the order rls.py uses them.
-# WEIGHT_NAMES = ["b_tau", "b_v", "b_abs_v", "b_tau_cos", "b_tan", "b_w2_cos", "b_0",
-#                 "a_g", "a_tau", "a_omega", "a_v", 
-#                 "a_abs_omega", "a_v_omega", "a_absV_omega",
-#                 "a_cos_omega", "a_sin_v", "a_sin", "a_cos_tau", "a_tau_v",
-#                 "a_0"]
-
-# WEIGHT_NAMES = ["b_tau", 
-#                 "b_v", 
-#                 "b_tau_cos", 
-#                 "b_0",
-
-#                 "a_g", 
-#                 "a_tau", 
-#                 "a_omega", 
-#                 "a_v", 
-#                 "a_0"]
-
-WEIGHT_NAMES = ["b_tau", 
-                "b_v", 
-                "b_abs_v", 
-                "b_tau_cos", 
-                "b_tanh", 
-                "b_omega_cos", 
-                "b_0",
-
-                "a_g", 
-                "a_tau", 
-                "a_omega", 
-                "a_v", 
-                "a_absw_w", 
-                "a_v_omega", 
-                "a_absv_w", 
-                "a_cos_omega", 
-                "a_sin_v",
-                "a_sin",
-                "a_cos_v",
-                "a_tau_v",
-                "a_0"]
 
 # ============================================================
 # Model persistence (GP obstacle knowledge + RLS dynamics)
@@ -210,7 +158,7 @@ class ObstacleNode:
             # self.controller = Controller(self.p, self.cfg, self.gp, integrator="rk4",
             #                              live_plot=(LIVE_PLOT and RENDER))
             
-            self.controller = Controller(self.p, self.cfg, self.gp,
+            self.controller = Controller(p=self.p, cfg=self.cfg, gp=self.gp, integrator="euler",
                              live_plot=(LIVE_PLOT and RENDER))
             
             self.controller.plot_obstacle_span = (1.7, 2.3)   # obstacle x-span shaded in the plan plot
@@ -222,8 +170,6 @@ class ObstacleNode:
         # the contribution is zero, x_std=1 so the standardization stays finite) as the
         # neutral vector handed to the controller.
         self.gp_params_zero = self.gp.mpc_params().copy()
-        if not GP_ENABLED:
-            print("[GP DISABLED] controller rollout uses RLS only (the GP still learns + logs).")
 
         # The unique MPPI reference: reach the goal (v_ref=0 so it stops there; the
         # theta/omega entries are ignored because their cost weights are 0).
@@ -257,6 +203,7 @@ class ObstacleNode:
         self.gp_pred_v_dot_pre = 0.0      # GP prediction at z_prev BEFORE the update
         self.gp_pred_omega_dot_pre = 0.0
         self.last_state = np.zeros(4)     # most recent IMU controller state [x,v,theta,omega]
+        self._prev_state = None
 
     # --- MuJoCo address helpers ---
     def _joint(self, name):
@@ -309,6 +256,33 @@ class ObstacleNode:
         """Longitudinal position x [m] and velocity v [m/s]."""
         return float(self.data.qpos[self.x_q]), float(self.data.qvel[self.x_v])
 
+
+    def nominal_accel(self, state, tau):
+        x, v, theta, omega = state
+
+        m = 5.1
+        r = 0.081
+        g = 9.81
+        l = 0.2
+        L_car = 0.53
+        H_body = 0.30
+
+        I_body = (1.0 / 12.0) * m * (L_car**2 + H_body**2)
+        I_eff = I_body + m * l**2
+
+        omega_dot = ((-tau + m * g * l * np.cos(theta)) / I_eff) 
+
+        if theta >= 0.0 and omega_dot > 0.0:
+            omega_dot = 0.0
+
+        x_dot = v
+        v_dot = (tau / (m * r))
+        theta_dot = omega
+
+        return v_dot, omega_dot
+
+
+
     # --- command publisher ---
     def publish_command(self, tau):
         self.data.ctrl[self.drive] = tau
@@ -341,6 +315,8 @@ class ObstacleNode:
         self.gp_pred_omega_dot_pre = 0.0
         self.last_state = np.zeros(4)
         self.controller.last_solution = None      # fresh warm start each episode
+        self._prev_state = None
+
 
     def step(self):
         mujoco.mj_step(self.model, self.data)
@@ -365,51 +341,67 @@ class ObstacleNode:
         tau_opt, info = self.controller.solve(state, self.ref, self.tau_prev, gp_params)
         return tau_opt, info
 
+
     def control_update(self):
-            x, v = self.read_odometry()
-            pitch, rate, vdot, wdot = self.read_imu()
-            state_now = np.array([x, v, pitch, rate], dtype=float)
-            self.last_state = state_now      # cached so log_row needn't re-read the IMU
+        x, v = self.read_odometry()
+        pitch, rate, _, _ = self.read_imu()
 
-            if self._prev_tau is not None:
-                # GP target: residual against the SAME nominal the rollout uses.
-                # nominal_accel = the lever model + ground clamp from nominal_model.py,
-                # which mppi_gp._deriv must also import (one function, two callers).
-                nom_v, nom_w = nominal_accel(state_now, self._prev_tau)
-                self.res_v_dot = float(vdot - nom_v)
-                self.res_omega_dot = float(wdot - nom_w)
-                self.n_used += 1
+        state_now = np.array([x, v, pitch, rate], dtype=float)
+        self.last_state = state_now
 
-                z = np.array([x, v, pitch, rate, self._prev_tau], dtype=float)
-                # predict at the SAME z BEFORE observing -> honest one-step error
-                self.gp_pred_v_dot_pre, self.gp_pred_omega_dot_pre, _ = self.gp.predict(z)
+        # Learn residual for the transition:
+        # previous state --tau_prev--> current state
+        if self._prev_tau is not None and self._prev_state is not None:
+            state_prev = self._prev_state
+            tau_prev = self._prev_tau
 
-                # keep crash physics out of the map: observe only in the driving regime
-                if abs(pitch) < 1.0 and abs(rate) < 8.0:
-                    self.gp.observe(z, self.res_v_dot, self.res_omega_dot)
+            vdot_meas = (state_now[1] - state_prev[1]) / self.ctrl_dt
+            wdot_meas = (state_now[3] - state_prev[3]) / self.ctrl_dt
 
-            tau, info = self._solve(state_now)
-            tau = float(np.clip(tau, self.p.tau_min, self.p.tau_max))
-            ctrl = float(np.clip(tau, self.ctrl_min, self.ctrl_max))
-            self.publish_command(ctrl)
+            nom_vdot, nom_wdot = self.nominal_accel(state_prev, tau_prev)
 
-            self.tau_prev = tau
-            self._prev_tau = tau
-            self.tau_cmd = tau
-            self.ctrl_cmd = ctrl
-            self.solve_success = bool(info["success"])
-            self.cost = info["cost"]
+            self.res_v_dot = float(vdot_meas - nom_vdot)
+            self.res_omega_dot = float(wdot_meas - nom_wdot)
+            self.n_used += 1
 
-            if self.control_count % PRINT_EVERY_N_CONTROLS == 0:
-                print(
-                    f"t={self.time:6.3f} | "
-                    f"x={state_now[0]:7.3f} | v={state_now[1]:7.3f} | "
-                    f"pitch={math.degrees(state_now[2]):8.2f} deg | "
-                    f"omega={state_now[3]:8.3f} | tau={tau:8.3f} | "
-                    f"ctrl={ctrl:8.3f} | cost={info['cost']} | "
-                    f"res[v={self.res_v_dot:6.3f}, w={self.res_omega_dot:6.3f}]"
-                )
-            self.control_count += 1
+            z = np.array([
+                state_prev[0],
+                state_prev[1],
+                state_prev[2],
+                state_prev[3],
+                tau_prev,
+            ], dtype=float)
+
+            self.gp_pred_v_dot_pre, self.gp_pred_omega_dot_pre, _ = self.gp.predict(z)
+
+            if abs(state_prev[2]) < 1.0 and abs(state_prev[3]) < 8.0:
+                self.gp.observe(z, self.res_v_dot, self.res_omega_dot)
+
+        tau, info = self._solve(state_now)
+        tau = float(np.clip(tau, self.p.tau_min, self.p.tau_max))
+        ctrl = float(np.clip(tau, self.ctrl_min, self.ctrl_max))
+        self.publish_command(ctrl)
+
+        self.tau_prev = tau
+        self._prev_tau = tau
+        self._prev_state = state_now.copy()
+
+        self.tau_cmd = tau
+        self.ctrl_cmd = ctrl
+        self.solve_success = bool(info["success"])
+        self.cost = info["cost"]
+
+        if self.control_count % PRINT_EVERY_N_CONTROLS == 0:
+            print(
+                f"t={self.time:6.3f} | "
+                f"x={state_now[0]:7.3f} | v={state_now[1]:7.3f} | "
+                f"pitch={math.degrees(state_now[2]):8.2f} deg | "
+                f"omega={state_now[3]:8.3f} | tau={tau:8.3f} | "
+                f"ctrl={ctrl:8.3f} | cost={info['cost']} | "
+                f"res[v={self.res_v_dot:6.3f}, w={self.res_omega_dot:6.3f}]"
+            )
+
+        self.control_count += 1
 
 
 
@@ -518,13 +510,6 @@ class ObstacleNode:
             self.run_episode(ep, viewer)
 
     def finish(self):
-        """Report the final (persisted) RLS coefficients and save the CSV log."""
-        # print(f"\nRLS/GP updates used: {self.n_used}   |   outliers held: {self.n_held}")
-        # print("Final RLS coefficients (persisted across episodes)")
-        # print("v_dot     = b_tau*tau + b_v*v + b_abs_v*|v|v + b_tau_cos*tau*cos(theta) + b_0")
-        # print("omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0")
-        # for i, name in enumerate(WEIGHT_NAMES):
-        #     print(f"{name:10s} learned: {self.rls.a[i]: .4f} | nominal: {self.rls.a_nom[i]: .4f}")
 
         self.logger.save_csv()
         if MODEL_PATH.exists():

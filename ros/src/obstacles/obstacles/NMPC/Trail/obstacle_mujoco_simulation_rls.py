@@ -23,12 +23,19 @@ CONTROLLER = "mppi"          # "nmpc" or "mppi"
 
 if CONTROLLER == "mppi":
     from params_mppi import WheelieParams, MPPIConfig as ControllerConfig
-    from mppi_dynamics import MPPITorch as Controller
+
+    # from mppi_dynamics import MPPITorch as Controller
+    # from mppi_rls import MPPITorch as Controller
+    #from mppi_gp import MPPITorch as Controller
+    from mppi_rls_gp import MPPITorch as Controller
 elif CONTROLLER == "nmpc":
     from params_nmpc import WheelieParams, MPCConfig as ControllerConfig
     from nmpc import NMPC as Controller
 else:
     raise ValueError(f"CONTROLLER must be 'mppi' or 'nmpc', got {CONTROLLER!r}")
+
+from rls import nominal_rls_parameters, rls_update
+from GP import GPConfig as SSGPConfig   # GPyTorch sparse GP residual model (shared by both)
 
 
 # ============================================================
@@ -42,7 +49,7 @@ RESULTS_DIR.mkdir(exist_ok=True)
 CSV_PATH = RESULTS_DIR / "obstacle_mujoco.csv"
 MODEL_PATH = RESULTS_DIR / "obstacle_model.npz"
 
-RENDER   = True       # True = watch the truck; False = fast headless run
+RENDER   = False       # True = watch the truck; False = fast headless run
 CTRL_DT  = 0.05       # control / MPPI period [s]
 INIT_Z   = 0.1512     # spawn height
 SIM_TIME = 20.0       # per-episode time cap [s]
@@ -52,7 +59,18 @@ PRINT_EVERY_N_CONTROLS = 1
 # reset each episode. Episode 1 learns where the obstacle is; episode 2 reuses that.
 N_EPISODES = 20
 
+# GP settings
+LOAD_MODEL = False    # True = RESUME from a saved model (GP posterior + RLS state)
+GP_ENABLED = True     # False = ZERO the GP's contribution (RLS-only control; GP still learns/logs)
+
 LIVE_PLOT = True          # True = live X-vs-theta plot of the MPPI plan while the sim runs
+
+# RLS settings. RLS_FREEZE=True holds a_rls at the nominal physics values
+RLS_FREEZE = True
+FORGETTING_FACTOR = 0.9995   # < 1 keeps the fit adaptive
+INITIAL_COVARIANCE = 3.0     # prior uncertainty on the weights
+SIGMA_V_DOT = 2.0            # measurement-noise std, v_dot channel
+SIGMA_OMEGA_DOT = 5.0        # measurement-noise std, omega_dot channel
 
 # Outlier gate: skip a step if the measured accel is bigger than this (contact impact).
 ACCEL_CAP_V = 15.0           # m/s^2
@@ -65,6 +83,114 @@ GOAL_TOL = 0.15          # an episode ends early once |x - GOAL_X| < GOAL_TOL
 INITIAL_X = 0.0
 INITIAL_Z = INIT_Z
 INITIAL_ROOT_PITCH_DEG = 0.0
+
+# The 10 weight names, in the order rls.py uses them.
+# WEIGHT_NAMES = ["b_tau", "b_v", "b_abs_v", "b_tau_cos", "b_tan", "b_w2_cos", "b_0",
+#                 "a_g", "a_tau", "a_omega", "a_v", 
+#                 "a_abs_omega", "a_v_omega", "a_absV_omega",
+#                 "a_cos_omega", "a_sin_v", "a_sin", "a_cos_tau", "a_tau_v",
+#                 "a_0"]
+
+# WEIGHT_NAMES = ["b_tau", 
+#                 "b_v", 
+#                 "b_tau_cos", 
+#                 "b_0",
+
+#                 "a_g", 
+#                 "a_tau", 
+#                 "a_omega", 
+#                 "a_v", 
+#                 "a_0"]
+
+WEIGHT_NAMES = ["b_tau", 
+                "b_v", 
+                "b_abs_v", 
+                "b_tau_cos", 
+                "b_tanh", 
+                "b_omega_cos", 
+                "b_0",
+
+                "a_g", 
+                "a_tau", 
+                "a_omega", 
+                "a_v", 
+                "a_absw_w", 
+                "a_v_omega", 
+                "a_absv_w", 
+                "a_cos_omega", 
+                "a_sin_v",
+                "a_sin",
+                "a_cos_v",
+                "a_tau_v",
+                "a_0"]
+
+# ============================================================
+# Small helpers
+# ============================================================
+
+def empty_rls_info() -> dict:
+    return {
+        "v_dot_raw": 0.0,
+        "omega_dot_raw": 0.0,
+        "v_dot_measured": 0.0,
+        "omega_dot_measured": 0.0,
+        "v_dot_hat": 0.0,
+        "omega_dot_hat": 0.0,
+        "v_dot_error": 0.0,
+        "omega_dot_error": 0.0,
+    }
+
+
+# ============================================================
+# Model persistence (GP obstacle knowledge + RLS dynamics)
+# ============================================================
+
+def save_model(path: Path, gp, a_rls: np.ndarray, P_rls: np.ndarray) -> None:
+    """Checkpoint the learned model so a later run can resume from it. Saves the GP
+    posterior (state_dict) plus the RLS state to a single .npz. No-op if the GP has not
+    warmed up yet (nothing learned to save)."""
+    sd = gp.state_dict()
+    if not sd:
+        return
+    np.savez(path, a_rls=a_rls, P_rls=P_rls,
+             **{f"gp_{k}": v for k, v in sd.items()})
+
+
+def load_model(path: Path, gp) -> tuple[np.ndarray, np.ndarray]:
+    """Restore a model saved by save_model() into `gp`; returns (a_rls, P_rls)."""
+    d = np.load(path, allow_pickle=False)
+    gp_sd = {k[len("gp_"):]: d[k] for k in d.files if k.startswith("gp_")}
+    gp.load_state_dict(gp_sd)
+    return d["a_rls"].copy(), d["P_rls"].copy()
+
+
+# ============================================================
+# RLSEstimator -- recursive least squares for the two-output model
+# ============================================================
+
+class RLSEstimator:
+    """Wraps rls_update. Starts from the nominal physics weights (not zeros) and, when
+    `freeze` is set, holds them fixed: it still computes the residual y - H@a_nom that the
+    GP learns from, but discards the posterior update so a_rls never drifts."""
+
+    def __init__(self, p, freeze: bool = RLS_FREEZE):
+        self.a_nom = nominal_rls_parameters(p)
+        self.a = self.a_nom.copy()
+        self.P = INITIAL_COVARIANCE * np.eye(len(WEIGHT_NAMES))
+        self.freeze = freeze
+
+    def update(self, state_prev, tau, state_next, accel_meas, dt):
+        a_saved, P_saved = (self.a.copy(), self.P.copy()) if self.freeze else (None, None)
+        self.a, self.P, info = rls_update(
+            state_prev=state_prev, tau=tau, state_next=state_next, dt=dt,
+            a=self.a, P=self.P, forgetting_factor=FORGETTING_FACTOR,
+            sigma_v_dot=SIGMA_V_DOT, sigma_omega_dot=SIGMA_OMEGA_DOT,
+            y_dot_meas=accel_meas,
+        )
+        if self.freeze:                 # hold weights fixed (info still carries the residual)
+            self.a, self.P = a_saved, P_saved
+        return info
+
 
 # ============================================================
 # EpisodeLogger -- collects the per-step rows, then saves the CSV
@@ -118,12 +244,21 @@ class ObstacleNode:
         self.p = WheelieParams()
         self.cfg = ControllerConfig()        # MPPIConfig or MPCConfig, per CONTROLLER
 
+        self.rls = RLSEstimator(self.p)
         self.logger = EpisodeLogger()
+
+        # GPyTorch sparse-variational GP residual learner (GP.py). Feature
+        # z = [x, v, theta, omega, tau]: the FULL system input. Built ONCE and kept alive
+        self.gp_cfg = SSGPConfig()
+        self.gp = self.gp_cfg.build()
 
         # Build the selected controller. The MPPI holds the BUILT gp object (and takes an
         # integrator); the NMPC takes the gp CONFIG and gets the GP via gp_params each solve.
-        if CONTROLLER == "mppi":          
-            self.controller = Controller(p=self.p, cfg=self.cfg, integrator="rk4",
+        if CONTROLLER == "mppi":
+            # self.controller = Controller(self.p, self.cfg, self.gp, integrator="rk4",
+            #                              live_plot=(LIVE_PLOT and RENDER))
+            
+            self.controller = Controller(self.p, self.cfg, self.gp,
                              live_plot=(LIVE_PLOT and RENDER))
             
             self.controller.plot_obstacle_span = (1.7, 2.3)   # obstacle x-span shaded in the plan plot
@@ -131,10 +266,29 @@ class ObstacleNode:
             self.controller = Controller(self.p, self.cfg, self.gp_cfg)
         print(f"[controller] {CONTROLLER}")
 
+        # GP_ENABLED=False -> RLS-only rollout. Capture the GP's not-ready params (alpha=0 so
+        # the contribution is zero, x_std=1 so the standardization stays finite) as the
+        # neutral vector handed to the controller.
+        self.gp_params_zero = self.gp.mpc_params().copy()
+        if not GP_ENABLED:
+            print("[GP DISABLED] controller rollout uses RLS only (the GP still learns + logs).")
+
         # The unique MPPI reference: reach the goal (v_ref=0 so it stops there; the
         # theta/omega entries are ignored because their cost weights are 0).
         # references = [xpos, velocity, theta, theta_dot]
         self.ref = np.array([GOAL_X, 0.0, 0.0, 0.0], dtype=float)
+
+        # Optionally RESUME from a previously saved model (GP posterior + RLS state).
+        if LOAD_MODEL and MODEL_PATH.exists():
+            self.rls.a, self.rls.P = load_model(MODEL_PATH, self.gp)
+            print(f"Loaded model from {MODEL_PATH.name} "
+                  f"(gp_ready={self.gp.ready}, n_active={self.gp.n_active})")
+        elif LOAD_MODEL:
+            print(f"[warn] LOAD_MODEL=True but {MODEL_PATH.name} not found -- learning from scratch")
+
+        # --- run-level diagnostics (accumulated across episodes) ---
+        self.n_used = 0                   # RLS/GP updates fed
+        self.n_held = 0                   # steps where a contact-impact outlier was replaced
 
         # --- per-episode bookkeeping (reset by reset_episode each episode) ---
         self._prev_omega = None           # previous gyro pitch rate, for the omega_dot difference
@@ -146,6 +300,11 @@ class ObstacleNode:
         self.ctrl_cmd = 0.0
         self.solve_success = False
         self.control_count = 0
+        self.res_v_dot = 0.0
+        self.res_omega_dot = 0.0
+        self.gp_pred_v_dot_pre = 0.0      # GP prediction at z_prev BEFORE the update
+        self.gp_pred_omega_dot_pre = 0.0
+        self.last_rls_info = empty_rls_info()
         self.last_state = np.zeros(4)     # most recent IMU controller state [x,v,theta,omega]
 
     # --- MuJoCo address helpers ---
@@ -191,7 +350,7 @@ class ObstacleNode:
             self._last_vdot, self._last_wdot = v_dot, omega_dot
         else:
             v_dot, omega_dot = self._last_vdot, self._last_wdot
-            #self.n_held += 1
+            self.n_held += 1
 
         return pitch, rate, v_dot, omega_dot
 
@@ -225,6 +384,11 @@ class ObstacleNode:
         self.ctrl_cmd = 0.0
         self.solve_success = False
         self.control_count = 0
+        self.res_v_dot = 0.0
+        self.res_omega_dot = 0.0
+        self.gp_pred_v_dot_pre = 0.0
+        self.gp_pred_omega_dot_pre = 0.0
+        self.last_rls_info = empty_rls_info()
         self.last_state = np.zeros(4)
         self.controller.last_solution = None      # fresh warm start each episode
 
@@ -240,12 +404,15 @@ class ObstacleNode:
         """Call the active controller with the right signature. The MPPI reads the GP
         through its held gp object; the NMPC needs the flat gp_params each solve."""
         if CONTROLLER == "mppi":
-            tau_opt, info = self.controller.solve(state, self.ref, self.tau_prev)
+            tau_opt, info = self.controller.solve(state, self.ref, self.tau_prev, self.rls.a)
             return tau_opt, info
-        else:
-            print("WARNING: USE MPPI CONTROLLER")
         
-        tau_opt, info = self.controller.solve(state, self.ref, self.tau_prev)
+        if GP_ENABLED:
+            gp_params = self.gp.mpc_params() 
+        else:
+            gp_params = self.gp_params_zero
+        
+        tau_opt, info = self.controller.solve(state, self.ref, self.tau_prev, self.rls.a, gp_params)
         return tau_opt, info
 
     def control_update(self):
@@ -253,6 +420,28 @@ class ObstacleNode:
         pitch, rate, vdot, wdot = self.read_imu()
         state_now = np.array([x, v, pitch, rate], dtype=float)
         self.last_state = state_now      # cached so log_row needn't re-read the IMU
+
+        if self._prev_tau is not None:
+            # Update the RLS ONCE per control period (weights frozen -> this just computes the
+            # residual y - H@a_nom, the GP's target).
+            self.last_rls_info = self.rls.update(
+                state_prev=state_now, tau=self._prev_tau, state_next=state_now,
+                accel_meas=np.array([vdot, wdot]), dt=self.ctrl_dt,
+            )
+            self.res_v_dot = float(self.last_rls_info["v_dot_error"])
+            self.res_omega_dot = float(self.last_rls_info["omega_dot_error"])
+            self.n_used += 1
+
+            # GP feature z = [x, v, theta, omega, tau]: the FULL system input that produced
+            # this residual (the current state under the command applied over the interval).
+            z = np.array([x, v, pitch, rate, self._prev_tau], dtype=float)
+            # Predict at the SAME z BEFORE the GP sees it -> a true one-step error
+            # (r_* - gp_*_pred_pre).
+            self.gp_pred_v_dot_pre, self.gp_pred_omega_dot_pre, _ = self.gp.predict(z)
+            # Buffer the residual sample; the GP absorbs the whole episode batch at
+            # end_episode(). It is frozen within the episode, so the controller plans against
+            # a fixed model and the impulsive omega spikes are smoothed as noise by the fit.
+            self.gp.observe(z, self.res_v_dot, self.res_omega_dot)
 
         tau, info = self._solve(state_now)
         tau = float(np.clip(tau, self.p.tau_min, self.p.tau_max))
@@ -273,6 +462,8 @@ class ObstacleNode:
                 f"pitch={math.degrees(state_now[2]):8.2f} deg | "
                 f"omega={state_now[3]:8.3f} | tau={tau:8.3f} | "
                 f"ctrl={ctrl:8.3f} | cost={info['cost']} | "
+                f"rls_err[v={self.last_rls_info['v_dot_error']:6.3f}, "
+                f"w={self.last_rls_info['omega_dot_error']:6.3f}]"
             )
         self.control_count += 1
 
@@ -283,6 +474,12 @@ class ObstacleNode:
         raw_pitch = float(self.data.qpos[self.pitch_q])
         raw_pitch_dot = float(self.data.qvel[self.pitch_v])
         pitch, rate = float(self.last_state[2]), float(self.last_state[3])   # IMU pitch/rate from the last control read
+
+        # GP residual prediction at the current state (diagnostics).
+        z_now = np.array([x, v, pitch, rate, self.tau_cmd], dtype=float)
+        gp_v_dot_pred, gp_omega_dot_pred, _ = self.gp.predict(z_now)
+        a_rls = self.rls.a
+        info = self.last_rls_info
 
         return {
             "episode": int(episode),
@@ -302,11 +499,47 @@ class ObstacleNode:
             "ctrl_cmd": self.ctrl_cmd,
             "solve_success": int(self.solve_success),
 
+            # RLS logs (two-output: v_dot and omega_dot).
+            "v_dot_raw": float(info["v_dot_raw"]),
+            "v_dot_filtered": float(info["v_dot_measured"]),
+            "v_dot_rls": float(info["v_dot_hat"]),
+            "v_dot_error": float(info["v_dot_error"]),
+            "omega_dot_raw": float(info["omega_dot_raw"]),
+            "omega_dot_filtered": float(info["omega_dot_measured"]),
+            "omega_dot_rls": float(info["omega_dot_hat"]),
+            "omega_dot_error": float(info["omega_dot_error"]),
+
+            # # v_dot coeffs: v_dot = b_tau*tau + b_v*v + b_abs_v*|v|v + b_tau_cos*tau*cos(theta) + b_0
+            # "b_tau": float(a_rls[0]),
+            # "b_v": float(a_rls[1]),
+            # "b_abs_v": float(a_rls[2]),
+            # "b_tau_cos": float(a_rls[3]),
+            # "b_0": float(a_rls[4]),
+
+            # # omega_dot coeffs: omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0
+            # "a_g": float(a_rls[5]),
+            # "a_tau": float(a_rls[6]),
+            # "a_omega": float(a_rls[7]),
+            # "a_v": float(a_rls[8]),
+            # "a_0": float(a_rls[9]),
+
+            # GP residual: measured target fed to the GP (r_*) and the GP's own prediction at
+            # the current state. Plot these vs x to see the obstacle the GP has localised.
+            "r_v_dot": float(self.res_v_dot),
+            "r_omega_dot": float(self.res_omega_dot),
+            "gp_v_dot_pred": float(gp_v_dot_pred),
+            "gp_omega_dot_pred": float(gp_omega_dot_pred),
+            # one-step prediction at z BEFORE the GP saw it; the one-step error is
+            # r_* - gp_*_pred_pre (clean target/pred pair).
+            "gp_v_dot_pred_pre": float(self.gp_pred_v_dot_pre),
+            "gp_omega_dot_pred_pre": float(self.gp_pred_omega_dot_pre),
+            "gp_ready": int(self.gp.ready),
         }
 
     def run_episode(self, episode: int, viewer=None):
         self.reset_episode()
-        print(f"\n==================== EPISODE {episode} ====================")
+        print(f"\n==================== EPISODE {episode} "
+              f"(gp_ready={self.gp.ready}, n_active={self.gp.n_active}) ====================")
         ep_history = []
         reached = False
         k = 0
@@ -337,9 +570,25 @@ class ObstacleNode:
                 reached = True
                 break
 
+        # Absorb this episode's buffered residuals into the GP (MBRL boundary): the FIRST
+        # full episode FITS the GPyTorch model (inducing points, ARD lengthscales, noise) on
+        # a rich batch; later episodes WARM-REFINE it. The GP was frozen during the episode.
+        self.gp.end_episode()
+
         x_final = float(self.data.qpos[self.x_q])
         print(f"[episode {episode}] x_final={x_final:.2f} m | goal={GOAL_X:.2f} m | "
-              f"reached={reached} | t={self.time:.2f}s | ")
+              f"reached={reached} | t={self.time:.2f}s | "
+              f"gp_ready={self.gp.ready} n_active={self.gp.n_active}")
+
+        # Per-episode GP one-step RMSE over the steps where the GP was active.
+        ready = [r for r in ep_history if r["gp_ready"] == 1]
+        if ready:
+            ew = np.array([r["r_omega_dot"] - r["gp_omega_dot_pred_pre"] for r in ready])
+            ev = np.array([r["r_v_dot"] - r["gp_v_dot_pred_pre"] for r in ready])
+            print(f"           GP one-step RMSE  omega={np.sqrt(np.mean(ew**2)):.4f}  "
+                  f"v={np.sqrt(np.mean(ev**2)):.4f}  ({len(ready)} ready steps)")
+
+        save_model(MODEL_PATH, self.gp, self.rls.a, self.rls.P)   # checkpoint after each episode
 
     def run(self, viewer=None):
         """Loop the episodes (GP + RLS persist; MuJoCo state resets each episode)."""
@@ -349,9 +598,17 @@ class ObstacleNode:
             self.run_episode(ep, viewer)
 
     def finish(self):
-        self.logger.save_csv()
-        print("[INFO]: data saved from the experiment")
+        """Report the final (persisted) RLS coefficients and save the CSV log."""
+        print(f"\nRLS/GP updates used: {self.n_used}   |   outliers held: {self.n_held}")
+        print("Final RLS coefficients (persisted across episodes)")
+        print("v_dot     = b_tau*tau + b_v*v + b_abs_v*|v|v + b_tau_cos*tau*cos(theta) + b_0")
+        print("omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0")
+        for i, name in enumerate(WEIGHT_NAMES):
+            print(f"{name:10s} learned: {self.rls.a[i]: .4f} | nominal: {self.rls.a_nom[i]: .4f}")
 
+        self.logger.save_csv()
+        if MODEL_PATH.exists():
+            print(f"Model checkpoint: {MODEL_PATH}  (set LOAD_MODEL=True to resume from it)")
 
 
 # ============================================================

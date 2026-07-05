@@ -12,26 +12,15 @@ class MPPITorch:
     K = MPPIConfig.K            # number of sampled rollouts
     SIGMA = MPPIConfig.SIGMA        # exploration std on tau
     LAM = MPPIConfig.LAM           # temperature (softmin sharpness)
-    SEED = MPPIConfig.SEED
 
-    def __init__(self, p, cfg, gp, device=None, fast=True, integrator="euler", dtype=None, live_plot=False):
+    def __init__(self, p, cfg, device="cuda", fast=True, integrator="euler", dtype=None, live_plot=False):
 
         self.p = p
-        self.cfg = cfg
-        self.gp = gp                                     # the GP OBJECT (called directly)
+        self.cfg = cfg                                   # the GP OBJECT (called directly)
         self.fast = bool(fast)
         self.integrator = str(integrator).lower()
         self.dtype = dtype if dtype is not None else (torch.float32 if fast else torch.double)
         self.device = torch.device("cuda")
-        # risk-averse weight on the GP's epistemic uncertainty (0 = off). >0 penalizes
-        # planning into regions the GP has NOT learned (needs gp.predict_uncertainty_torch).
-        self.q_gp_var = float(getattr(cfg, "q_gp_var", 0.0))
-        if self.q_gp_var > 0.0 and not hasattr(gp, "predict_uncertainty_torch"):
-            raise TypeError("q_gp_var > 0 needs a GP with predict_uncertainty_torch().")
-        self.last_solution = None                        # warm-start plan, (N,) tensor
-        self.plot_hook = None                            # set to a fn(self,s0,U,S,U_opt,a,dt) to live-plot; None = zero overhead
-        self.gen = torch.Generator(device=self.device)
-        self.gen.manual_seed(self.SEED)
 
         # Plot
         # --- live plan plot (optional; one figure, updated each solve) ---
@@ -114,50 +103,27 @@ class MPPITorch:
                                      trail=trail, car=car, trail_x=[], trail_t=[])
 
     # ---- dynamics: nominal dynamics  ---
-    # def _deriv(self, s, tau):
-    #     x, v, th, om = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
-
-    #     m = 5.1
-    #     r = 0.081
-    #     g = 9.81
-    #     l = 0.2
-    #     L_car = 0.53
-    #     H_body = 0.30
-
-    #     x_dot = v
-    #     v_dot = tau / (m * r)
-    #     th_dot = om
-
-    #     I_body = (1.0 / 12.0) * m * (L_car**2 + H_body**2)
-    #     I_eff = I_body + m * l**2
-
-    #     print("[DEBUG]: ", I_eff)
-
-    #     om_dot = (-tau + m * g * l * torch.sin(th)) / I_eff
-
-    #     return torch.stack([x_dot, v_dot, th_dot, om_dot], dim=-1)
-
     def _deriv(self, s, tau):
-
-        M, R, G = 5.1, 0.081, 9.81
-        L_R = 0.20                                   # CoM -> rear axle, horizontal [m]
-        H   = 0.16                                   # CoM height when flat [m]
-        RHO   = math.hypot(L_R, H - R)               # 0.215 m
-        ALPHA = math.atan2(H - R, L_R)               # 0.377 rad
-        I_C   = (1.0 / 12.0) * M * (0.53**2 + 0.30**2)
-        I_A   = I_C + M * RHO**2                     # 0.394 kg m^2, about the rear contact
-        C_OMEGA = 0.2                                # small pitch damping, tune to MuJoCo
-
         x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
-        beta = ALPHA - theta
-        lever_drive   = R + RHO * torch.sin(beta)        # CoM height, grows with rear-up
-        lever_gravity = RHO * torch.cos(beta)            # horizontal offset, shrinks
-        omega_dot = (-(tau / R) * lever_drive + M * G * lever_gravity) / I_A - C_OMEGA * omega
+
+        m = 5.1
+        r = 0.081
+        g = 9.81
+        l = 0.2
+        L_car = 0.53
+        H_body = 0.30
+
+        x_dot = v
+        v_dot = tau / (m * r)
+        theta_dot = omega
+
+        I_body = (1.0 / 12.0) * m * (L_car**2 + H_body**2)
+        I_eff = I_body + m * l**2
+
+        omega_dot = (-tau + m * g * l * torch.cos(theta)) / I_eff
         on_ground = (theta >= 0.0) & (omega_dot > 0.0)   # floor absorbs nose-down push
         omega_dot = torch.where(on_ground, torch.zeros_like(omega_dot), omega_dot)
-        x_dot = v
-        v_dot = tau / (M * R)
-        theta_dot = omega
+
         return torch.stack([x_dot, v_dot, theta_dot, omega_dot], dim=-1)
 
 
@@ -193,21 +159,17 @@ class MPPITorch:
             d_tau   = tau   - tau_prev    # torque change since last step
 
             theta_deg = torch.rad2deg(theta)
-            e_theta_deg = theta_deg - ref[2]
+            e_theta_deg = theta_deg - torch.rad2deg(ref[2])
 
             cost_goal       = cfg.q_x     * e_x     ** 2
             cost_speed      = cfg.q_v     * e_v     ** 2
             cost_pitch      = cfg.q_theta * e_theta ** 2
-            #cost_pitch      = cfg.q_theta * e_theta_deg ** 2
+            cost_pitch_deg      = cfg.q_theta * e_theta_deg ** 2
             cost_pitch_rate = cfg.q_omega * e_omega ** 2
             cost_torque     = cfg.r_tau   * tau     ** 2
             cost_smooth     = cfg.r_dtau  * d_tau   ** 2
 
-            # cg = cost_goal.mean().item()
-            # cp = cost_pitch.mean().item()
-            # print(f"cost_goal={cg:.2f}  cost_pitch={cp:.2f}  ratio={cp/max(cg,1e-9):.3f}")
-
-            return cost_goal + cost_pitch
+            return cost_goal + cost_pitch_deg + cost_smooth
 
     
     # ---- the controller: state in -> action out ---------------------------
@@ -217,7 +179,7 @@ class MPPITorch:
     #   3. weight them  w^m = exp(-J^m/lambda) / sum_j exp(-J^j/lambda)      (3),(4)
     #   4. update  U* = U_nom + sum_m w^m eps^m,  apply the first action     (5)
     @torch.no_grad()
-    def solve(self, state, ref, tau_prev, a_rls):
+    def solve(self, state, ref, tau_prev):
         p, cfg, dev = self.p, self.cfg, self.device
         # k=Samples, N=Horizon, dt=Sample time
         K, N, dt = self.K, int(cfg.N), float(cfg.dt)
@@ -229,17 +191,9 @@ class MPPITorch:
         s0  = torch.as_tensor(state, dtype=self.dtype, device=dev).reshape(-1)   # (4,)
         ref = torch.as_tensor(ref,   dtype=self.dtype, device=dev).reshape(-1)   # (4,)
 
-        # receding waypoint: track a point ~one horizon ahead, capped at the goal.
-        # bounds cost magnitude -> lambda/sigma stay valid at any goal distance.
-        # ref= [xpos, velocity, pitch, pitch_dot]
-        LOOKAHEAD = 6.0                                   # ~ v_max * N * dt [m]
-        ref = ref.clone()
-        ref[0] = torch.minimum(ref[0], s0[0] + LOOKAHEAD)
-
         # 1. sample K control sequences around the warm-started nominal
         U_nom = self._warm_start(N, tau_prev)                                    # (N,)  u_t
-        eps = sigma * torch.randn(K, N, generator=self.gen,
-                                  dtype=self.dtype, device=dev)                # (K,N) ~ N(0, sigma^2)
+        eps = sigma * torch.randn(K, N, device=dev)                # (K,N) ~ N(0, sigma^2)
         U = torch.clamp(U_nom.unsqueeze(0) + eps, tau_min, tau_max)             # (K,N) V^m
         eps = U - U_nom.unsqueeze(0)                                          # effective noise after clamp
 
@@ -265,19 +219,13 @@ class MPPITorch:
         # 3. costs -> weights  (subtract min cost rho first; it cancels but avoids overflow)
         rho = J.min()
         w = torch.exp(-(J - rho) / lam)                                          # exp(-(J - rho)/lambda)
-        w = w / w.sum()                                                          # normalize (sum >= 1)
+        # w = w / w.sum()                                                          # normalize (sum >= 1)
+        w_sum = w.sum() + 1e-8
 
         # 4. weighted update; U_opt is the new plan, U_opt[0] is the action applied
-        U_opt = torch.clamp(U_nom + (w.unsqueeze(1) * eps).sum(0), tau_min, tau_max)
+        du = (w.unsqueeze(1) * eps).sum(0) / w_sum
+        U_opt = torch.clamp(U_nom + du, tau_min, tau_max)
         self.last_solution = U_opt                                              # warm start next call
-
-        # ess = 1.0 / (w ** 2).sum()
-        # print(f"ESS = {ess.item():.0f} / {K}")
-
-        # good = J[J < J.median()]                      # the samples that actually get weight
-        # spread = (good.max() - good.min()).item()
-        # ess = 1.0 / (w ** 2).sum()
-        # print(f"J_min={rho.item():.0f}  spread={spread:.0f}  J_max={J.max().item():.0f}  ESS={ess.item():.0f}/{K}")
 
         if self.live_plot:
             self._plot_plan(s0, U, J, U_opt, dt, ref)
