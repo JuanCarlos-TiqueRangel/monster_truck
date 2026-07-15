@@ -7,8 +7,11 @@
 *.bundle
 repo-backup.bundle
 
-# Ignore CSV files
+# Ignore CSV files, pytorch and npz models
 *.csv
+*.pt
+*.npz
 
 # folder acados
 /NMPC/acados/
+
