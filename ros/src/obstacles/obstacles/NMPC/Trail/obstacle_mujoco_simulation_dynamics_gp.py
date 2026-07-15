@@ -30,7 +30,8 @@ elif CONTROLLER == "nmpc":
 else:
     raise ValueError(f"CONTROLLER must be 'mppi' or 'nmpc', got {CONTROLLER!r}")
 
-from GP import GPConfig as SSGPConfig   # GPyTorch sparse GP residual model (shared by both)
+# from GP import GPConfig as SSGPConfig   # GPyTorch sparse GP residual model (shared by both)
+from simple_svgp import SVGPConfig, SVGPRegressor
 
 
 # ============================================================
@@ -42,7 +43,8 @@ XML_PATH = _ROOT / "monster_truck_flip_2d.xml"
 RESULTS_DIR = _ROOT / "results"
 RESULTS_DIR.mkdir(exist_ok=True)
 CSV_PATH = RESULTS_DIR / "obstacle_mujoco.csv"
-MODEL_PATH = RESULTS_DIR / "obstacle_model.npz"
+# MODEL_PATH = RESULTS_DIR / "obstacle_model.npz"
+MODEL_PATH = RESULTS_DIR / "obstacle_model.pt"
 
 RENDER   = False       # True = watch the truck; False = fast headless run
 CTRL_DT  = 0.05       # control / MPPI period [s]
@@ -52,7 +54,7 @@ PRINT_EVERY_N_CONTROLS = 1
 
 # Episodic learning: the GP (and RLS) persist across episodes, the MuJoCo state is
 # reset each episode. Episode 1 learns where the obstacle is; episode 2 reuses that.
-N_EPISODES = 50
+N_EPISODES = 1000
 
 # GP settings
 LOAD_MODEL = False    # True = RESUME from a saved model (GP posterior + RLS state)
@@ -76,21 +78,13 @@ INITIAL_ROOT_PITCH_DEG = 0.0
 # Model persistence (GP obstacle knowledge + RLS dynamics)
 # ============================================================
 
-def save_model(path: Path, gp) -> None:
-    """Checkpoint the learned model so a later run can resume from it. Saves the GP
-    posterior (state_dict) plus the RLS state to a single .npz. No-op if the GP has not
-    warmed up yet (nothing learned to save)."""
-    sd = gp.state_dict()
-    if not sd:
-        return
-    np.savez(path, **{f"gp_{k}": v for k, v in sd.items()})
+def save_model(path, gp):
+    if gp.ready:
+        gp.save(path)
 
 
-def load_model(path: Path, gp) -> tuple[np.ndarray, np.ndarray]:
-    """Restore a model saved by save_model() into `gp`; returns (a_rls, P_rls)."""
-    d = np.load(path, allow_pickle=False)
-    gp_sd = {k[len("gp_"):]: d[k] for k in d.files if k.startswith("gp_")}
-    gp.load_state_dict(gp_sd)
+def load_model(path):
+    return SVGPRegressor.load(path, map_location="cuda")
 
 
 # ============================================================
@@ -149,15 +143,34 @@ class ObstacleNode:
 
         # GPyTorch sparse-variational GP residual learner (GP.py). Feature
         # z = [x, v, theta, omega, tau]: the FULL system input. Built ONCE and kept alive
-        self.gp_cfg = SSGPConfig()
-        self.gp = self.gp_cfg.build()
+        # self.gp_cfg = SSGPConfig()
+        # self.gp = self.gp_cfg.build()
+        self.gp_cfg = SVGPConfig(
+            n_inducing=1000,
+            n_iter_fit=300,
+            n_iter_update=300,
+            lr=0.03,
+            kernel="matern32",
+            device="cuda",
+        )
+
+        self.gp = SVGPRegressor(self.gp_cfg)
+
+        # Optionally RESUME from a previously saved model (GP posterior + RLS state).
+        if LOAD_MODEL and MODEL_PATH.exists():
+            self.gp = load_model(MODEL_PATH)
+            print(f"Loaded model from {MODEL_PATH.name} "
+                f"(gp_ready={self.gp.ready}, n_active={self.gp.cfg.n_inducing if self.gp.ready else 0})")
+        elif LOAD_MODEL:
+            print(f"[warn] LOAD_MODEL=True but {MODEL_PATH.name} not found -- learning from scratch")
+
 
         # Build the selected controller. The MPPI holds the BUILT gp object (and takes an
         # integrator); the NMPC takes the gp CONFIG and gets the GP via gp_params each solve.
         if CONTROLLER == "mppi":
             # self.controller = Controller(self.p, self.cfg, self.gp, integrator="rk4",
             #                              live_plot=(LIVE_PLOT and RENDER))
-            
+
             self.controller = Controller(p=self.p, cfg=self.cfg, gp=self.gp, integrator="euler",
                              live_plot=(LIVE_PLOT and RENDER))
             
@@ -169,20 +182,12 @@ class ObstacleNode:
         # GP_ENABLED=False -> RLS-only rollout. Capture the GP's not-ready params (alpha=0 so
         # the contribution is zero, x_std=1 so the standardization stays finite) as the
         # neutral vector handed to the controller.
-        self.gp_params_zero = self.gp.mpc_params().copy()
+        # self.gp_params_zero = self.gp.mpc_params().copy()
 
         # The unique MPPI reference: reach the goal (v_ref=0 so it stops there; the
         # theta/omega entries are ignored because their cost weights are 0).
         # references = [xpos, velocity, theta, theta_dot]
         self.ref = np.array([GOAL_X, 0.0, 0.0, 0.0], dtype=float)
-
-        # Optionally RESUME from a previously saved model (GP posterior + RLS state).
-        if LOAD_MODEL and MODEL_PATH.exists():
-            load_model(MODEL_PATH, self.gp)
-            print(f"Loaded model from {MODEL_PATH.name} "
-                  f"(gp_ready={self.gp.ready}, n_active={self.gp.n_active})")
-        elif LOAD_MODEL:
-            print(f"[warn] LOAD_MODEL=True but {MODEL_PATH.name} not found -- learning from scratch")
 
         # --- run-level diagnostics (accumulated across episodes) ---
         self.n_used = 0                   # RLS/GP updates fed
@@ -281,7 +286,12 @@ class ObstacleNode:
 
         return v_dot, omega_dot
 
+    def predict_gp_residual(self, z):
+        if not self.gp.ready:
+            return 0.0, 0.0
 
+        pred, _ = self.gp.predict(z)
+        return float(pred[0, 0]), float(pred[0, 1])
 
     # --- command publisher ---
     def publish_command(self, tau):
@@ -362,6 +372,8 @@ class ObstacleNode:
 
             self.res_v_dot = float(vdot_meas - nom_vdot)
             self.res_omega_dot = float(wdot_meas - nom_wdot)
+            # self.res_v_dot = float(nom_vdot)
+            # self.res_omega_dot = float(nom_wdot)
             self.n_used += 1
 
             z = np.array([
@@ -372,10 +384,14 @@ class ObstacleNode:
                 tau_prev,
             ], dtype=float)
 
-            self.gp_pred_v_dot_pre, self.gp_pred_omega_dot_pre, _ = self.gp.predict(z)
+            # self.gp_pred_v_dot_pre, self.gp_pred_omega_dot_pre, _ = self.gp.predict(z)
+            self.gp_pred_v_dot_pre, self.gp_pred_omega_dot_pre = self.predict_gp_residual(z)
 
-            if abs(state_prev[2]) < 1.0 and abs(state_prev[3]) < 8.0:
-                self.gp.observe(z, self.res_v_dot, self.res_omega_dot)
+            y = np.array([self.res_v_dot, self.res_omega_dot], dtype=np.float32)
+            self.gp.observe(z, y)
+
+            # if abs(state_prev[2]) < 1.0 and abs(state_prev[3]) < 8.0:
+            #     self.gp.observe(z, self.res_v_dot, self.res_omega_dot)
 
         tau, info = self._solve(state_now)
         tau = float(np.clip(tau, self.p.tau_min, self.p.tau_max))
@@ -415,7 +431,7 @@ class ObstacleNode:
 
         # GP residual prediction at the current state (diagnostics).
         z_now = np.array([x, v, pitch, rate, self.tau_cmd], dtype=float)
-        gp_v_dot_pred, gp_omega_dot_pred, _ = self.gp.predict(z_now)
+        gp_v_dot_pred, gp_omega_dot_pred = self.predict_gp_residual(z_now)
 
         return {
             "episode": int(episode),
@@ -451,7 +467,7 @@ class ObstacleNode:
     def run_episode(self, episode: int, viewer=None):
         self.reset_episode()
         print(f"\n==================== EPISODE {episode} "
-              f"(gp_ready={self.gp.ready}, n_active={self.gp.n_active}) ====================")
+              f"(gp_ready={self.gp.ready}, n_active={self.gp.cfg.n_inducing if self.gp.ready else 0}) ====================")
         ep_history = []
         reached = False
         k = 0
@@ -490,7 +506,7 @@ class ObstacleNode:
         x_final = float(self.data.qpos[self.x_q])
         print(f"[episode {episode}] x_final={x_final:.2f} m | goal={GOAL_X:.2f} m | "
               f"reached={reached} | t={self.time:.2f}s | "
-              f"gp_ready={self.gp.ready} n_active={self.gp.n_active}")
+              f"gp_ready={self.gp.ready} n_active={self.gp.cfg.n_inducing if self.gp.ready else 0}")
 
         # Per-episode GP one-step RMSE over the steps where the GP was active.
         ready = [r for r in ep_history if r["gp_ready"] == 1]

@@ -1,64 +1,3 @@
-"""
-================================================================================
-GP.py  --  GPyTorch sparse-variational GP residual model (5-input / 2-output)
-================================================================================
-
-INPUT   z = [position_x, velocity, pitch, angular_pitch, tau]      (d_in = 5)
-OUTPUT      [v_dot_residual, omega_dot_residual]                   (d_out = 2)
-
-    full dynamics  =  nominal (RLS)  +  residual (this GP)
-
-The MPPI / NMPC rollout evaluates the nominal RLS dynamics and ADDS this GP's two
-residual channels. So the GP only has to explain whatever the parametric RLS model
-leaves on the table (the obstacle / un-modelled effects).
-
---------------------------------------------------------------------------------
-Why this exact shape (the controller contract)
---------------------------------------------------------------------------------
-The controllers (mppi/mppi.py numba, nmpc/nmpc.py casadi) do NOT call torch. They
-re-evaluate the GP posterior MEAN along the horizon as a kernel sum over a FIXED set
-of M inducing points (the kernel SHAPE is selectable -- Matern-3/2 shown):
-
-    z_std = (z - x_mean) / x_std
-    mu(z) = y_mean + sum_j alpha_j * sf2 * k(r_j),   r_j = || (z_std - Z_j) / ell ||
-
-The shared closed-form kernel k(.) lives in gp_kernel.py (numba + numpy + casadi), so
-the math is written ONCE; `kernel_id` selects the shape. `mpc_params()` exports a flat
-vector the controllers unpack:
-
-    Z(M*d)  alpha_v(M)  alpha_w(M)  x_mean(d)  x_std(d)
-    ell_v(d)  ell_w(d)  sf2_v  sf2_w  y_mean_v  y_mean_w  kernel_id
-
-Two consequences pin the design:
-  (1) Z, x_mean, x_std are SHARED across both channels  -> we use ONE input
-      standardization and a SINGLE set of FIXED inducing points (shared by both
-      SVGPs). Hyperparameters (ell, sf2) and the dual weights alpha are PER channel.
-  (2) The exported `alpha_j` must satisfy  mu(z) = y_mean + sum_j alpha_j k(z, Z_j).
-      For an SVGP the posterior mean IS exactly such a kernel expansion in the
-      inducing points, so we recover alpha = Kzz^{-1} m(Z) by querying GPyTorch's
-      OWN posterior mean at the inducing points and solving one small system. This
-      reuses GPyTorch's math (whitening etc.) instead of re-deriving it -- which is
-      the whole point of using GPyTorch: you can trust/debug the model directly.
-
---------------------------------------------------------------------------------
-Episodic (MBRL) learning loop -- same contract the sim already uses
---------------------------------------------------------------------------------
-    gp.observe(z, r_v_dot, r_omega_dot)   # buffer one residual sample (per step)
-    ...
-    gp.end_episode()                      # absorb the buffer: FIRST time -> build
-                                          # structure (standardization + inducing
-                                          # points) + train; later -> warm-refine
-    gp.mpc_params()                       # flat export the controller plans against
-
-The model is FROZEN within an episode (the controller plans against a fixed map);
-it only changes at the episode boundary. Inducing points + input standardization
-are fixed at the FIRST fit and kept (so the trained torch posterior stays valid and
-warm-starts cleanly); later episodes just keep optimising the variational posterior
-+ hyperparameters on the accumulated buffer.
-
-Dependencies: torch, gpytorch, numpy, scipy.
-================================================================================
-"""
 
 from dataclasses import dataclass
 
@@ -94,6 +33,7 @@ class _ChannelSVGP(gpytorch.models.ApproximateGP):
         # so far from data the residual reverts to the mean residual
         self.mean_module = gpytorch.means.ZeroMean()
         self.covar_module = covar_module               # built by ResidualGP._make_covar
+
 
     def forward(self, x):
         return gpytorch.distributions.MultivariateNormal(

@@ -26,7 +26,7 @@ if CONTROLLER == "mppi":
     from mppi_dynamics import MPPITorch as Controller
 elif CONTROLLER == "nmpc":
     from params_nmpc import WheelieParams, MPCConfig as ControllerConfig
-    from nmpc import NMPC as Controller
+    from nmpc_dynamics import NMPC as Controller
 else:
     raise ValueError(f"CONTROLLER must be 'mppi' or 'nmpc', got {CONTROLLER!r}")
 
@@ -120,15 +120,24 @@ class ObstacleNode:
 
         self.logger = EpisodeLogger()
 
-        # Build the selected controller. The MPPI holds the BUILT gp object (and takes an
-        # integrator); the NMPC takes the gp CONFIG and gets the GP via gp_params each solve.
+        # Build the selected controller. 
         if CONTROLLER == "mppi":          
-            self.controller = Controller(p=self.p, cfg=self.cfg, integrator="rk4",
-                             live_plot=(LIVE_PLOT and RENDER))
-            
+            self.controller = Controller(
+                                p=self.p, 
+                                cfg=self.cfg, 
+                                integrator="rk4",
+                                live_plot=(LIVE_PLOT and RENDER)
+                                )
             self.controller.plot_obstacle_span = (1.7, 2.3)   # obstacle x-span shaded in the plan plot
         else:  # nmpc
-            self.controller = Controller(self.p, self.cfg, self.gp_cfg)
+            self.controller = Controller(
+                                self.p,
+                                self.cfg,
+                                live_plot=(LIVE_PLOT and RENDER),
+                            )
+            self.controller.plot_obstacle_span = (1.7, 2.3)
+
+
         print(f"[controller] {CONTROLLER}")
 
         # The unique MPPI reference: reach the goal (v_ref=0 so it stops there; the
@@ -237,9 +246,11 @@ class ObstacleNode:
 
     # --- control / run ---
     def _solve(self, state):
-        """Call the active controller with the right signature. The MPPI reads the GP
-        through its held gp object; the NMPC needs the flat gp_params each solve."""
+
         if CONTROLLER == "mppi":
+            tau_opt, info = self.controller.solve(state, self.ref, self.tau_prev)
+            return tau_opt, info
+        if CONTROLLER == "nmpc":
             tau_opt, info = self.controller.solve(state, self.ref, self.tau_prev)
             return tau_opt, info
         else:
@@ -272,7 +283,7 @@ class ObstacleNode:
                 f"x={state_now[0]:7.3f} | v={state_now[1]:7.3f} | "
                 f"pitch={math.degrees(state_now[2]):8.2f} deg | "
                 f"omega={state_now[3]:8.3f} | tau={tau:8.3f} | "
-                f"ctrl={ctrl:8.3f} | cost={info['cost']} | "
+                f"ctrl={ctrl:8.3f} | cost={info['cost']} | solve={self.solve_success}"
             )
         self.control_count += 1
 
@@ -342,7 +353,6 @@ class ObstacleNode:
               f"reached={reached} | t={self.time:.2f}s | ")
 
     def run(self, viewer=None):
-        """Loop the episodes (GP + RLS persist; MuJoCo state resets each episode)."""
         for ep in range(N_EPISODES):
             if viewer is not None and not viewer.is_running():
                 break

@@ -6,3 +6,9 @@
 # Local git bundle backups
 *.bundle
 repo-backup.bundle
+
+# Ignore CSV files
+*.csv
+
+# folder acados
+/NMPC/acados/
