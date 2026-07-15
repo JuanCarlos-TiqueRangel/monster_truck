@@ -7,18 +7,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 from types import SimpleNamespace
 
+
 class MPPITorch:
     # same sampler settings as the numba mppi.py so behaviour is comparable
     K = MPPIConfig.K            # number of sampled rollouts
     SIGMA = MPPIConfig.SIGMA        # exploration std on tau
     LAM = MPPIConfig.LAM           # temperature (softmin sharpness)
-    SEED = MPPIConfig.SEED
 
     def __init__(self, p, cfg, gp, device=None, fast=True, integrator="euler", dtype=None, live_plot=False):
 
         self.p = p
         self.cfg = cfg
-        self.gp = gp                                     # the GP OBJECT (called directly)
+        self.gp = gp
+        self.a_rls = None
         self.fast = bool(fast)
         self.integrator = str(integrator).lower()
         self.dtype = dtype if dtype is not None else (torch.float32 if fast else torch.double)
@@ -29,9 +30,6 @@ class MPPITorch:
         if self.q_gp_var > 0.0 and not hasattr(gp, "predict_uncertainty_torch"):
             raise TypeError("q_gp_var > 0 needs a GP with predict_uncertainty_torch().")
         self.last_solution = None                        # warm-start plan, (N,) tensor
-        self.plot_hook = None                            # set to a fn(self,s0,U,S,U_opt,a,dt) to live-plot; None = zero overhead
-        self.gen = torch.Generator(device=self.device)
-        self.gen.manual_seed(self.SEED)
 
         # Plot
         # --- live plan plot (optional; one figure, updated each solve) ---
@@ -41,58 +39,89 @@ class MPPITorch:
         self._plot_off = False               # set True if matplotlib/display is unavailable
 
 
-    def _plot_plan(self, s0, U, S, U_opt, dt, ref, n_best=50):
+    def _plot_plan(self, s0, U, S, U_opt, dt, ref, n_best=100):
         if self._plot_off:
             return
         try:
             N = int(U.shape[1])
+            goal_x = ref[0]
+            direction = 1.0 if float(goal_x - s0[0]) >= 0.0 else -1.0
 
             with torch.no_grad():
-                # n_best cheapest sampled rollouts (one batched re-roll)
                 idx = torch.argsort(S)[:n_best]
                 sb = s0.unsqueeze(0).repeat(idx.numel(), 1)
-                xs, ths = [sb[:, 0].clone()], [sb[:, 2].clone()]
-                
+                active = direction * (goal_x - sb[:, 0]) > 0.0
+
+                xs = [sb[:, 0].clone()]
+                ths = [sb[:, 2].clone()]
+
                 for n in range(N):
-                    sb = self._step(sb, U[idx, n], dt)
-                    xs.append(sb[:, 0].clone()); ths.append(sb[:, 2].clone())
-                
+                    active_before = active.clone()
+
+                    if torch.any(active):
+                        rows = torch.where(active)[0]
+                        sb_next = self._step(sb[rows], U[idx[rows], n], dt)
+                        reached = direction * (goal_x - sb_next[:, 0]) <= 0.0
+                        sb_next[reached, 0] = goal_x
+                        sb[rows] = sb_next
+                        active[rows[reached]] = False
+
+                    nan_x = torch.full_like(sb[:, 0], torch.nan)
+                    nan_theta = torch.full_like(sb[:, 2], torch.nan)
+                    xs.append(torch.where(active_before, sb[:, 0], nan_x))
+                    ths.append(torch.where(active_before, sb[:, 2], nan_theta))
+
                 xs = torch.stack(xs, 1).cpu().numpy()
                 ths = np.degrees(torch.stack(ths, 1).cpu().numpy())
 
-                # the optimal plan
                 so = s0.unsqueeze(0)
-                xo, tho = [so[:, 0].clone()], [so[:, 2].clone()]
+                active_opt = bool(direction * float(goal_x - so[0, 0]) > 0.0)
+                xo = [so[:, 0].clone()]
+                tho = [so[:, 2].clone()]
 
                 for n in range(N):
+                    if not active_opt:
+                        xo.append(torch.full_like(so[:, 0], torch.nan))
+                        tho.append(torch.full_like(so[:, 2], torch.nan))
+                        continue
+
                     so = self._step(so, U_opt[n:n + 1], dt)
-                    xo.append(so[:, 0].clone()); tho.append(so[:, 2].clone())
-                
+                    reached = direction * (goal_x - so[0, 0]) <= 0.0
+
+                    if reached:
+                        so[0, 0] = goal_x
+                        active_opt = False
+
+                    xo.append(so[:, 0].clone())
+                    tho.append(so[:, 2].clone())
+
                 xo = torch.stack(xo, 1).cpu().numpy().ravel()
                 tho = np.degrees(torch.stack(tho, 1).cpu().numpy().ravel())
 
-            if self._plot is None:                 # first call: build the figure once
+            if self._plot is None:
                 self._plot_setup(plt, ref, n_best)
             pl = self._plot
 
-            for line, x, t in zip(pl.samples, xs, ths):
-                line.set_data(x, t)
+            for line, x, theta in zip(pl.samples, xs, ths):
+                line.set_data(x, theta)
             pl.opt.set_data(xo, tho)
 
-            # realized trail = the true (x, theta) the truck has passed through. s0 each
-            # solve IS the current real state; a big backward jump in x = episode reset.
             xr, tr = float(s0[0]), math.degrees(float(s0[2]))
             if pl.trail_x and pl.trail_x[-1] - xr > 0.5:
-                pl.trail_x.clear(); pl.trail_t.clear()
-            pl.trail_x.append(xr); pl.trail_t.append(tr)
+                pl.trail_x.clear()
+                pl.trail_t.clear()
+            pl.trail_x.append(xr)
+            pl.trail_t.append(tr)
             pl.trail.set_data(pl.trail_x, pl.trail_t)
-            pl.car.set_data([xr], [tr])            # blue circle = current (x, theta)
+            pl.car.set_data([xr], [tr])
 
-            pl.fig.canvas.draw_idle(); pl.fig.canvas.flush_events()
+            pl.fig.canvas.draw_idle()
+            pl.fig.canvas.flush_events()
             plt.pause(0.001)
-        except Exception as exc:                   # no display / matplotlib -> disable, don't crash
+        except Exception as exc:
             print(f"[plot_plan] disabled ({exc})")
             self._plot_off = True
+
 
     def _plot_setup(self, plt, ref, n_best):
         """Build the persistent figure and empty line artists (called once, on first draw)."""
@@ -100,7 +129,7 @@ class MPPITorch:
         plt.ion()
         fig, ax = plt.subplots()
         ax.set(xlabel="x [m]", ylabel="theta [deg]",
-               xlim=(-2.0, 10 + 2.0), ylim=(-120, 120),
+               xlim=(-2.0, goal_x + 2.0), ylim=(-120, 120),
                title="MPPI planned trajectories (x vs theta)")
         if self.plot_obstacle_span is not None:
             ax.axvspan(*self.plot_obstacle_span, color="0.85", zorder=0)
@@ -113,35 +142,40 @@ class MPPITorch:
         self._plot = SimpleNamespace(fig=fig, ax=ax, samples=samples, opt=opt,
                                      trail=trail, car=car, trail_x=[], trail_t=[])
 
+
+    # ---- dynamics: RLS full model + GP residual ---
     def _deriv(self, s, tau):
-
-        M, R, G = 5.1, 0.081, 9.81
-        L_R = 0.20                                   # CoM -> rear axle, horizontal [m]
-        H   = 0.16                                   # CoM height when flat [m]
-        RHO   = math.hypot(L_R, H - R)               # 0.215 m
-        ALPHA = math.atan2(H - R, L_R)               # 0.377 rad
-        I_C   = (1.0 / 12.0) * M * (0.53**2 + 0.30**2)
-        I_A   = I_C + M * RHO**2                     # 0.394 kg m^2, about the rear contact
-        C_OMEGA = 0.2                                # small pitch damping, tune to MuJoCo
-
         x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
-
-        # GP RESIDUAL INFO
-        X = torch.stack([x, v, theta, omega, tau], dim=-1)     # (K,5) feature z=[x,v,theta,omega,tau]
-        res_v, res_w = self.gp.predict_torch_fast(X, dtype=self.dtype)
-
-        beta = ALPHA - theta
-        lever_drive   = R + RHO * torch.sin(beta)        # CoM height, grows with rear-up
-        lever_gravity = RHO * torch.cos(beta)            # horizontal offset, shrinks
-        omega_dot = (-(tau / R) * lever_drive + M * G * lever_gravity) / I_A - C_OMEGA * omega + res_w
-        on_ground = (theta >= 0.0) & (omega_dot > 0.0)   # floor absorbs nose-down push
-        omega_dot = torch.where(on_ground, torch.zeros_like(omega_dot), omega_dot) 
+        a = self.a_rls
 
         x_dot = v
-        v_dot = (tau / (M * R)) + res_v
-        theta_dot = omega
-        return torch.stack([x_dot, v_dot, theta_dot, omega_dot], dim=-1)
+        v_dot = (
+            a[0] * tau
+            + a[1] * v
+            + a[2] * torch.abs(v) * v
+            + a[3] * tau * torch.cos(theta)
+            + a[4]
+        )
 
+        theta_dot = omega
+        omega_dot = (
+            a[5] * torch.cos(theta)
+            + a[6] * tau
+            + a[7] * omega
+            + a[8] * v
+            + a[9]
+        )
+
+        if self.gp is not None and self.gp.ready:
+            X = torch.stack([x, v, theta, omega, tau], dim=-1)
+            residual = self.gp.predict_torch_fast(X)
+            v_dot = v_dot + residual[:, 0]
+            omega_dot = omega_dot + residual[:, 1]
+
+        on_ground = (theta >= 0.0) & (omega_dot > 0.0)
+        omega_dot = torch.where(on_ground, torch.zeros_like(omega_dot), omega_dot)
+
+        return torch.stack([x_dot, v_dot, theta_dot, omega_dot], dim=-1)
 
 
     def _step(self, s, tau, dt):
@@ -164,32 +198,58 @@ class MPPITorch:
         return s
 
 
+    # def _stage_cost(self, s, tau, tau_prev, ref):
+    #         cfg, p = self.cfg, self.p
+    #         x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
+
+    #         e_x     = x     - ref[0]      # position error
+    #         e_v     = v     - ref[1]      # speed error
+    #         e_theta = theta - ref[2]      # pitch error
+    #         e_omega = omega - ref[3]      # pitch-rate error
+    #         d_tau   = tau   - tau_prev    # torque change since last step
+
+    #         theta_deg = torch.rad2deg(theta)
+    #         e_theta_deg = theta_deg - torch.rad2deg(ref[2])
+
+    #         cost_goal       = cfg.q_x     * e_x     ** 2
+    #         cost_speed      = cfg.q_v     * e_v     ** 2
+    #         cost_pitch      = cfg.q_theta * e_theta ** 2
+    #         cost_pitch_deg      = cfg.q_theta * e_theta_deg ** 2
+    #         cost_pitch_rate = cfg.q_omega * e_omega ** 2
+    #         cost_torque     = cfg.r_tau   * tau     ** 2
+    #         cost_smooth     = cfg.r_dtau  * d_tau   ** 2
+
+    #         return cost_goal
+
+
     def _stage_cost(self, s, tau, tau_prev, ref):
-            cfg, p = self.cfg, self.p
-            x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
+        cfg = self.cfg
+        x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
 
-            e_x     = x     - ref[0]      # position error
-            e_v     = v     - ref[1]      # speed error
-            e_theta = theta - ref[2]      # pitch error
-            e_omega = omega - ref[3]      # pitch-rate error
-            d_tau   = tau   - tau_prev    # torque change since last step
+        e_x = x - ref[0]
+        e_v = v - ref[1]
+        d_tau = tau - tau_prev
 
-            theta_deg = torch.rad2deg(theta)
-            e_theta_deg = theta_deg - ref[2]
+        theta_deg = torch.rad2deg(theta)
 
-            cost_goal       = cfg.q_x     * e_x     ** 2
-            cost_speed      = cfg.q_v     * e_v     ** 2
-            cost_pitch      = cfg.q_theta * e_theta ** 2
-            #cost_pitch      = cfg.q_theta * e_theta_deg ** 2
-            cost_pitch_rate = cfg.q_omega * e_omega ** 2
-            cost_torque     = cfg.r_tau   * tau     ** 2
-            cost_smooth     = cfg.r_dtau  * d_tau   ** 2
+        too_much_wheelie = torch.relu((-theta_deg) - 75.0)
+        nose_down = torch.relu(theta_deg)
 
-            # cg = cost_goal.mean().item()
-            # cp = cost_pitch.mean().item()
-            # print(f"cost_goal={cg:.2f}  cost_pitch={cp:.2f}  ratio={cp/max(cg,1e-9):.3f}")
+        cost_goal = cfg.q_x * e_x**2
+        cost_speed = cfg.q_v * e_v**2
+        cost_pitch = cfg.q_theta * (too_much_wheelie**2 + nose_down**2)
+        cost_pitch_rate = cfg.q_omega * omega**2
+        cost_torque = cfg.r_tau * tau**2
+        cost_smooth = cfg.r_dtau * d_tau**2
 
-            return cost_goal + cost_pitch
+        return (
+            cost_goal
+            #+ cost_speed
+            + cost_pitch
+            + cost_pitch_rate
+            #+ cost_torque
+            + cost_smooth
+        )
 
     
     # ---- the controller: state in -> action out ---------------------------
@@ -201,74 +261,69 @@ class MPPITorch:
     @torch.no_grad()
     def solve(self, state, ref, tau_prev, a_rls):
         p, cfg, dev = self.p, self.cfg, self.device
-        # k=Samples, N=Horizon, dt=Sample time
         K, N, dt = self.K, int(cfg.N), float(cfg.dt)
-        # lam=temperature, sigma=exploration std
         lam, sigma = float(self.LAM), float(self.SIGMA)
         tau_min, tau_max = float(p.tau_min), float(p.tau_max)
         tau_prev = float(tau_prev)
 
-        s0  = torch.as_tensor(state, dtype=self.dtype, device=dev).reshape(-1)   # (4,)
-        ref = torch.as_tensor(ref,   dtype=self.dtype, device=dev).reshape(-1)   # (4,)
+        s0 = torch.as_tensor(state, dtype=self.dtype, device=dev).reshape(-1)
+        ref = torch.as_tensor(ref, dtype=self.dtype, device=dev).reshape(-1)
+        self.a_rls = torch.as_tensor(a_rls, dtype=self.dtype, device=dev).reshape(10)
 
-        # receding waypoint: track a point ~one horizon ahead, capped at the goal.
-        # bounds cost magnitude -> lambda/sigma stay valid at any goal distance.
-        # ref= [xpos, velocity, pitch, pitch_dot]
-        LOOKAHEAD = 6.0                                   # ~ v_max * N * dt [m]
-        ref = ref.clone()
-        ref[0] = torch.minimum(ref[0], s0[0] + LOOKAHEAD)
+        U_nom = self._warm_start(N, tau_prev)
+        eps = sigma * torch.randn(K, N, dtype=self.dtype, device=dev)
+        U = torch.clamp(U_nom.unsqueeze(0) + eps, tau_min, tau_max)
+        eps = U - U_nom.unsqueeze(0)
 
-        # 1. sample K control sequences around the warm-started nominal
-        U_nom = self._warm_start(N, tau_prev)                                    # (N,)  u_t
-        eps = sigma * torch.randn(K, N, generator=self.gen,
-                                  dtype=self.dtype, device=dev)                # (K,N) ~ N(0, sigma^2)
-        U = torch.clamp(U_nom.unsqueeze(0) + eps, tau_min, tau_max)             # (K,N) V^m
-        eps = U - U_nom.unsqueeze(0)                                          # effective noise after clamp
-
-        # 2. roll every sequence through the dynamics and accumulate its cost J
-        s = s0.unsqueeze(0).repeat(K, 1)                                         # (K,4) all start at x_0
+        s = s0.unsqueeze(0).repeat(K, 1)
         J = torch.zeros(K, dtype=self.dtype, device=dev)
         prev = torch.full((K,), tau_prev, dtype=self.dtype, device=dev)
+        used = torch.zeros(K, N, dtype=self.dtype, device=dev)
 
-        # Running Cost
+        goal_x = ref[0]
+        direction = 1.0 if float(goal_x - s0[0]) >= 0.0 else -1.0
+        active = direction * (goal_x - s[:, 0]) > 0.0
+
         for n in range(N):
-            tau = U[:, n]                                                        # u_n for every sample
-            J = J + self._stage_cost(s, tau, prev, ref)                       # running cost l(x_n, u_n)
-            s = self._step(s, tau, dt)                                        # x_{n+1} = F(x_n, u_n)
-            prev = tau
-        
-        # Terminal Cost
-        e = s - ref                                                             # terminal cost phi(x_N)
-        J = J + cfg.q_x * e[:, 0]**2 + cfg.q_theta * e[:, 2]**2
-        # J = J + (cfg.q_x * e[:, 0]**2 + cfg.q_v * e[:, 1]**2
-        #          + cfg.q_theta * e[:, 2]**2 + cfg.q_omega * e[:, 3]**2)
+            if not torch.any(active):
+                break
+
+            rows = torch.where(active)[0]
+            tau = U[rows, n]
+
+            J[rows] += self._stage_cost(s[rows], tau, prev[rows], ref)
+            s_next = self._step(s[rows], tau, dt)
+
+            reached = direction * (goal_x - s_next[:, 0]) <= 0.0
+            s_next[reached, 0] = goal_x
+
+            s[rows] = s_next
+            prev[rows] = tau
+            used[rows, n] = 1.0
+            active[rows[reached]] = False
+
+        e = s - ref
+        J += cfg.q_terminal_x * e[:, 0]**2
+        J += cfg.q_terminal_theta * e[:, 2]**2
+        J += cfg.q_terminal_omega * e[:, 3]**2
+        J += -cfg.q_progress * s[:, 0]
         J = torch.nan_to_num(J, nan=1e12, posinf=1e12, neginf=1e12)
 
-        # 3. costs -> weights  (subtract min cost rho first; it cancels but avoids overflow)
         rho = J.min()
-        w = torch.exp(-(J - rho) / lam)                                          # exp(-(J - rho)/lambda)
-        w = w / w.sum()                                                          # normalize (sum >= 1)
+        w = torch.exp(-(J - rho) / lam)
+        w_sum = w.sum() + 1e-8
 
-        # 4. weighted update; U_opt is the new plan, U_opt[0] is the action applied
-        U_opt = torch.clamp(U_nom + (w.unsqueeze(1) * eps).sum(0), tau_min, tau_max)
-        self.last_solution = U_opt                                              # warm start next call
-
-        # ess = 1.0 / (w ** 2).sum()
-        # print(f"ESS = {ess.item():.0f} / {K}")
-
-        # good = J[J < J.median()]                      # the samples that actually get weight
-        # spread = (good.max() - good.min()).item()
-        # ess = 1.0 / (w ** 2).sum()
-        # print(f"J_min={rho.item():.0f}  spread={spread:.0f}  J_max={J.max().item():.0f}  ESS={ess.item():.0f}/{K}")
+        du = (w.unsqueeze(1) * eps * used).sum(0) / w_sum
+        U_opt = torch.clamp(U_nom + du, tau_min, tau_max)
+        self.last_solution = U_opt
 
         if self.live_plot:
             self._plot_plan(s0, U, J, U_opt, dt, ref)
 
-        U_opt = float(U_opt[0].item())
-        info = {"success": True, "cost": float(rho.item())}
-
-        #return float(U_opt[0].item()), {"success": True, "cost": float(rho.item())}
-        return U_opt, info
+        return float(U_opt[0].item()), {
+            "success": True,
+            "cost": float(rho.item()),
+        }
 
     def _warm_start(self, N, tau_prev):
         if self.last_solution is None:
