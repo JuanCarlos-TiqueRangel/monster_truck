@@ -143,7 +143,7 @@ class ObstacleNode:
         # The unique MPPI reference: reach the goal (v_ref=0 so it stops there; the
         # theta/omega entries are ignored because their cost weights are 0).
         # references = [xpos, velocity, theta, theta_dot]
-        self.ref = np.array([GOAL_X, 0.0, 0.0, 0.0], dtype=float)
+        self.ref = np.array([0.0, 0.0, -1.22, 0.0], dtype=float)
 
         # --- per-episode bookkeeping (reset by reset_episode each episode) ---
         self._prev_omega = None           # previous gyro pitch rate, for the omega_dot difference

@@ -46,7 +46,7 @@ CSV_PATH = RESULTS_DIR / "obstacle_mujoco.csv"
 # MODEL_PATH = RESULTS_DIR / "obstacle_model.npz"
 MODEL_PATH = RESULTS_DIR / "obstacle_model.pt"
 
-RENDER   = False       # True = watch the truck; False = fast headless run
+RENDER   = True       # True = watch the truck; False = fast headless run
 CTRL_DT  = 0.05       # control / MPPI period [s]
 INIT_Z   = 0.1512     # spawn height
 SIM_TIME = 20.0       # per-episode time cap [s]
