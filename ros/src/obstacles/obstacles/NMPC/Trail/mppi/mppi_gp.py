@@ -672,12 +672,8 @@ class MPPITorch:
         tau_max = float(p.tau_max)
         tau_prev = float(tau_prev)
 
-        s0 = torch.as_tensor(
-            state, dtype=self.dtype, device=dev
-        ).reshape(-1)
-        ref = torch.as_tensor(
-            ref, dtype=self.dtype, device=dev
-        ).reshape(-1)
+        s0 = torch.as_tensor(state, dtype=self.dtype, device=dev).reshape(-1)
+        ref = torch.as_tensor(ref, dtype=self.dtype, device=dev).reshape(-1)
         goal_x = ref[0]
 
         # The controller is for forward motion. If the measured car has
@@ -697,24 +693,20 @@ class MPPITorch:
 
         # 1. Sample control sequences.
         U_nom = self._warm_start(N, tau_prev)
-        eps = sigma * torch.randn(
-            K, N, dtype=self.dtype, device=dev
-        )
-        U = torch.clamp(
-            U_nom.unsqueeze(0) + eps, tau_min, tau_max
-        )
+        eps = sigma * torch.randn(K, N, dtype=self.dtype, device=dev)
+        U = torch.clamp(U_nom.unsqueeze(0) + eps, tau_min, tau_max)
         eps = U - U_nom.unsqueeze(0)
 
         # 2. Roll out only active trajectories.
         s = s0.unsqueeze(0).repeat(K, 1)
         J = torch.zeros(K, dtype=self.dtype, device=dev)
-        prev = torch.full(
-            (K,), tau_prev, dtype=self.dtype, device=dev
-        )
+        prev = torch.full((K,), tau_prev, dtype=self.dtype, device=dev)
         active = s[:, 0] < goal_x
-        control_used = torch.zeros(
-            K, N, dtype=torch.bool, device=dev
-        )
+        control_used = torch.zeros(K, N, dtype=torch.bool, device=dev)
+
+        goal_x = ref[0]
+        direction = 1.0 if float(goal_x - s0[0]) >= 0.0 else -1.0
+        active = direction * (goal_x - s[:, 0]) > 0.0
 
         for n in range(N):
             idx = torch.nonzero(active, as_tuple=False).squeeze(1)

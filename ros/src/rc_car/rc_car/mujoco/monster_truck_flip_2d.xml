@@ -1,5 +1,5 @@
 <mujoco model="monster_truck_flip_2d">
-  <option gravity="0 0 -9.81" integrator="RK4" timestep="0.001"/>
+  <option gravity="0 0 -9.81" integrator="RK4" timestep="0.0001"/>
   <compiler angle="radian"/>
 
   <default>

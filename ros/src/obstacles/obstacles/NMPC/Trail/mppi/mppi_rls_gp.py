@@ -39,77 +39,93 @@ class MPPITorch:
         self._plot_off = False               # set True if matplotlib/display is unavailable
 
 
+    # ------------------------------------------------------------------
+    # Plot
+    # ------------------------------------------------------------------
+
+    @torch.no_grad()
+    def _rollout_for_plot(self, s0, controls, dt, goal_x):
+        """Roll out each trajectory only until it reaches the forward x goal."""
+        s = s0.clone()
+        M, N = controls.shape
+        goal_x = torch.as_tensor(goal_x, dtype=s.dtype, device=s.device)
+        active = s[:, 0] < goal_x
+
+        xs = [s[:, 0].clone()]
+        thetas = [s[:, 2].clone()]
+
+        for n in range(N):
+            idx = torch.nonzero(active, as_tuple=False).squeeze(1)
+
+            x_draw = torch.full(
+                (M,), torch.nan, dtype=s.dtype, device=s.device
+            )
+            theta_draw = torch.full(
+                (M,), torch.nan, dtype=s.dtype, device=s.device
+            )
+
+            if idx.numel() > 0:
+                s_next, reached = self._step_to_goal(
+                    s[idx], controls[idx, n], dt, goal_x
+                )
+                s[idx] = s_next
+
+                x_draw[idx] = s_next[:, 0]
+                theta_draw[idx] = s_next[:, 2]
+                active[idx[reached]] = False
+
+            xs.append(x_draw)
+            thetas.append(theta_draw)
+
+        return torch.stack(xs, 1), torch.stack(thetas, 1)
+    
+    
+
     def _plot_plan(self, s0, U, S, U_opt, dt, ref, n_best=100):
         if self._plot_off:
             return
+
         try:
-            N = int(U.shape[1])
-            goal_x = ref[0]
-            direction = 1.0 if float(goal_x - s0[0]) >= 0.0 else -1.0
+            n_best = min(int(n_best), int(U.shape[0]))
 
             with torch.no_grad():
                 idx = torch.argsort(S)[:n_best]
                 sb = s0.unsqueeze(0).repeat(idx.numel(), 1)
-                active = direction * (goal_x - sb[:, 0]) > 0.0
-
-                xs = [sb[:, 0].clone()]
-                ths = [sb[:, 2].clone()]
-
-                for n in range(N):
-                    active_before = active.clone()
-
-                    if torch.any(active):
-                        rows = torch.where(active)[0]
-                        sb_next = self._step(sb[rows], U[idx[rows], n], dt)
-                        reached = direction * (goal_x - sb_next[:, 0]) <= 0.0
-                        sb_next[reached, 0] = goal_x
-                        sb[rows] = sb_next
-                        active[rows[reached]] = False
-
-                    nan_x = torch.full_like(sb[:, 0], torch.nan)
-                    nan_theta = torch.full_like(sb[:, 2], torch.nan)
-                    xs.append(torch.where(active_before, sb[:, 0], nan_x))
-                    ths.append(torch.where(active_before, sb[:, 2], nan_theta))
-
-                xs = torch.stack(xs, 1).cpu().numpy()
-                ths = np.degrees(torch.stack(ths, 1).cpu().numpy())
+                xs, ths = self._rollout_for_plot(
+                    sb, U[idx], dt, ref[0]
+                )
+                xs = xs.cpu().numpy()
+                ths = np.degrees(ths.cpu().numpy())
 
                 so = s0.unsqueeze(0)
-                active_opt = bool(direction * float(goal_x - so[0, 0]) > 0.0)
-                xo = [so[:, 0].clone()]
-                tho = [so[:, 2].clone()]
-
-                for n in range(N):
-                    if not active_opt:
-                        xo.append(torch.full_like(so[:, 0], torch.nan))
-                        tho.append(torch.full_like(so[:, 2], torch.nan))
-                        continue
-
-                    so = self._step(so, U_opt[n:n + 1], dt)
-                    reached = direction * (goal_x - so[0, 0]) <= 0.0
-
-                    if reached:
-                        so[0, 0] = goal_x
-                        active_opt = False
-
-                    xo.append(so[:, 0].clone())
-                    tho.append(so[:, 2].clone())
-
-                xo = torch.stack(xo, 1).cpu().numpy().ravel()
-                tho = np.degrees(torch.stack(tho, 1).cpu().numpy().ravel())
+                xo, tho = self._rollout_for_plot(
+                    so, U_opt.unsqueeze(0), dt, ref[0]
+                )
+                xo = xo.cpu().numpy().ravel()
+                tho = np.degrees(tho.cpu().numpy().ravel())
 
             if self._plot is None:
                 self._plot_setup(plt, ref, n_best)
+
             pl = self._plot
 
             for line, x, theta in zip(pl.samples, xs, ths):
                 line.set_data(x, theta)
-            pl.opt.set_data(xo, tho)
 
-            xr, tr = float(s0[0]), math.degrees(float(s0[2]))
+            for line in pl.samples[len(xs):]:
+                line.set_data([], [])
+
+            pl.opt.set_data(xo, tho)
+            goal_x = float(ref[0].item())
+            pl.goal.set_xdata([goal_x, goal_x])
+
+            xr = float(s0[0].item())
+            tr = math.degrees(float(s0[2].item()))
+
             if pl.trail_x and pl.trail_x[-1] - xr > 0.5:
                 pl.trail_x.clear()
                 pl.trail_t.clear()
+
             pl.trail_x.append(xr)
             pl.trail_t.append(tr)
             pl.trail.set_data(pl.trail_x, pl.trail_t)
@@ -118,29 +134,61 @@ class MPPITorch:
             pl.fig.canvas.draw_idle()
             pl.fig.canvas.flush_events()
             plt.pause(0.001)
+
         except Exception as exc:
             print(f"[plot_plan] disabled ({exc})")
             self._plot_off = True
 
 
+
     def _plot_setup(self, plt, ref, n_best):
-        """Build the persistent figure and empty line artists (called once, on first draw)."""
-        goal_x = float(ref[0])
+        goal_x = float(ref[0].item())
+
         plt.ion()
         fig, ax = plt.subplots()
-        ax.set(xlabel="x [m]", ylabel="theta [deg]",
-               xlim=(-2.0, goal_x + 2.0), ylim=(-120, 120),
-               title="MPPI planned trajectories (x vs theta)")
+        ax.set(
+            xlabel="x [m]",
+            ylabel="theta [deg]",
+            xlim=(-2.0, 12.0),
+            ylim=(-120.0, 120.0),
+            title="MPPI planned trajectories (x vs theta)",
+        )
+
         if self.plot_obstacle_span is not None:
             ax.axvspan(*self.plot_obstacle_span, color="0.85", zorder=0)
+
         ax.grid(True, alpha=0.3)
-        samples = [ax.plot([], [], color="0.7", lw=0.6, alpha=0.5)[0] for _ in range(n_best)]
-        opt,   = ax.plot([], [], "C3-o", lw=2.0, ms=3, label="optimal plan")
-        trail, = ax.plot([], [], "C0-",  lw=1.3, alpha=0.85, label="realized")
-        car,   = ax.plot([], [], "o", ms=12, mfc="blue", mec="k", mew=1.0, zorder=5, label="car")
+
+        samples = [
+            ax.plot([], [], color="0.7", lw=0.6, alpha=0.5)[0]
+            for _ in range(n_best)
+        ]
+        opt, = ax.plot(
+            [], [], "C3-o", lw=2.0, ms=3, label="optimal plan"
+        )
+        trail, = ax.plot(
+            [], [], "C0-", lw=1.3, alpha=0.85, label="realized"
+        )
+        car, = ax.plot(
+            [], [], "o", ms=12, mfc="blue", mec="k", mew=1.0,
+            zorder=5, label="car"
+        )
+        goal = ax.axvline(
+            goal_x, linestyle="--", lw=1.5, label="x goal"
+        )
+
         ax.legend(loc="upper left")
-        self._plot = SimpleNamespace(fig=fig, ax=ax, samples=samples, opt=opt,
-                                     trail=trail, car=car, trail_x=[], trail_t=[])
+        self._plot = SimpleNamespace(
+            fig=fig,
+            ax=ax,
+            samples=samples,
+            opt=opt,
+            trail=trail,
+            car=car,
+            goal=goal,
+            trail_x=[],
+            trail_t=[],
+        )
 
 
     # ---- dynamics: RLS full model + GP residual ---
@@ -224,20 +272,25 @@ class MPPITorch:
 
     def _stage_cost(self, s, tau, tau_prev, ref):
         cfg = self.cfg
-        x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
+
+        x = s[:, 0]
+        v = s[:, 1]
+        theta = s[:, 2]
+        omega = s[:, 3]
 
         e_x = x - ref[0]
         e_v = v - ref[1]
         d_tau = tau - tau_prev
 
         theta_deg = torch.rad2deg(theta)
-
         too_much_wheelie = torch.relu((-theta_deg) - 75.0)
         nose_down = torch.relu(theta_deg)
 
         cost_goal = cfg.q_x * e_x**2
         cost_speed = cfg.q_v * e_v**2
-        cost_pitch = cfg.q_theta * (too_much_wheelie**2 + nose_down**2)
+        cost_pitch = cfg.q_theta * (
+            too_much_wheelie**2 + nose_down**2
+        )
         cost_pitch_rate = cfg.q_omega * omega**2
         cost_torque = cfg.r_tau * tau**2
         cost_smooth = cfg.r_dtau * d_tau**2
@@ -247,7 +300,7 @@ class MPPITorch:
             #+ cost_speed
             + cost_pitch
             + cost_pitch_rate
-            #+ cost_torque
+            # + cost_torque
             + cost_smooth
         )
 
@@ -269,6 +322,22 @@ class MPPITorch:
         s0 = torch.as_tensor(state, dtype=self.dtype, device=dev).reshape(-1)
         ref = torch.as_tensor(ref, dtype=self.dtype, device=dev).reshape(-1)
         self.a_rls = torch.as_tensor(a_rls, dtype=self.dtype, device=dev).reshape(10)
+        goal_x = ref[0]
+
+        # The controller is for forward motion. If the measured car has
+        # reached or passed x_goal, do not generate another rollout batch.
+        if bool((s0[0] >= goal_x).item()):
+            stop_tau = min(max(0.0, tau_min), tau_max)
+            self.last_solution = torch.full(
+                (N,), stop_tau, dtype=self.dtype, device=dev
+            )
+            return stop_tau, {
+                "success": True,
+                "cost": 0.0,
+                "goal_reached": True,
+                "reached_fraction": 1.0,
+                "mean_rollout_steps": 0.0,
+            }
 
         U_nom = self._warm_start(N, tau_prev)
         eps = sigma * torch.randn(K, N, dtype=self.dtype, device=dev)
@@ -278,54 +347,119 @@ class MPPITorch:
         s = s0.unsqueeze(0).repeat(K, 1)
         J = torch.zeros(K, dtype=self.dtype, device=dev)
         prev = torch.full((K,), tau_prev, dtype=self.dtype, device=dev)
-        used = torch.zeros(K, N, dtype=self.dtype, device=dev)
+        active = s[:, 0] < goal_x
+        control_used = torch.zeros(K, N, dtype=torch.bool, device=dev)
 
         goal_x = ref[0]
         direction = 1.0 if float(goal_x - s0[0]) >= 0.0 else -1.0
         active = direction * (goal_x - s[:, 0]) > 0.0
 
         for n in range(N):
-            if not torch.any(active):
+            idx = torch.nonzero(active, as_tuple=False).squeeze(1)
+            if idx.numel() == 0:
                 break
 
-            rows = torch.where(active)[0]
-            tau = U[rows, n]
+            s_active = s[idx]
+            tau_active = U[idx, n]
+            prev_active = prev[idx]
+            control_used[idx, n] = True
 
-            J[rows] += self._stage_cost(s[rows], tau, prev[rows], ref)
-            s_next = self._step(s[rows], tau, dt)
+            J[idx] += self._stage_cost(
+                s_active, tau_active, prev_active, ref
+            )
 
-            reached = direction * (goal_x - s_next[:, 0]) <= 0.0
-            s_next[reached, 0] = goal_x
+            s_next, reached = self._step_to_goal(
+                s_active, tau_active, dt, goal_x
+            )
+            s[idx] = s_next
+            prev[idx] = tau_active
+            active[idx[reached]] = False
 
-            s[rows] = s_next
-            prev[rows] = tau
-            used[rows, n] = 1.0
-            active[rows[reached]] = False
-
+        # 3. Terminal cost at the first goal crossing or at horizon N.
         e = s - ref
-        J += cfg.q_terminal_x * e[:, 0]**2
-        J += cfg.q_terminal_theta * e[:, 2]**2
-        J += cfg.q_terminal_omega * e[:, 3]**2
-        J += -cfg.q_progress * s[:, 0]
-        J = torch.nan_to_num(J, nan=1e12, posinf=1e12, neginf=1e12)
+        terminal_cost_x = cfg.q_terminal_x * e[:, 0] ** 2
+        
+        terminal_cost_v = float(
+            getattr(cfg, "q_terminal_v", 0.0)
+        ) * e[:, 1] ** 2
 
+        #terminal_cost_theta = cfg.q_terminal_theta * e[:, 2] ** 2
+
+        terminal_cost_omega = cfg.q_terminal_omega * e[:, 3] ** 2
+        
+        cost_progress_terminal = -cfg.q_progress * s[:, 0]
+
+        theta_deg = torch.rad2deg(s[:, 2])
+        too_much_wheelie = torch.relu((-theta_deg) - 75.0)
+        nose_down = torch.relu(theta_deg)
+        terminal_cost_pitch = cfg.q_theta * (
+            too_much_wheelie**2 + nose_down**2
+        )
+
+        J += (
+            terminal_cost_x
+            #+ terminal_cost_v
+            + terminal_cost_pitch
+            #+ terminal_cost_omega
+            + cost_progress_terminal
+        )
+
+        J = torch.nan_to_num(
+            J, nan=1e12, posinf=1e12, neginf=1e12
+        )
+
+        # 4. MPPI weights.
         rho = J.min()
         w = torch.exp(-(J - rho) / lam)
-        w_sum = w.sum() + 1e-8
 
-        du = (w.unsqueeze(1) * eps * used).sum(0) / w_sum
-        U_opt = torch.clamp(U_nom + du, tau_min, tau_max)
+        # A rollout contributes at n only if it was still active at n.
+        used = control_used.to(self.dtype)
+        weighted_used = w.unsqueeze(1) * used
+        numerator = (weighted_used * eps).sum(0)
+        denominator = weighted_used.sum(0)
+
+        du = torch.where(
+            denominator > 1e-8,
+            numerator / denominator.clamp_min(1e-8),
+            torch.zeros_like(numerator),
+        )
+
+        U_opt = torch.clamp(
+            U_nom + du, tau_min, tau_max
+        )
+
+        # Controls after all rollouts have terminated are not used.
+        zero_tau = min(max(0.0, tau_min), tau_max)
+        U_opt = torch.where(
+            control_used.any(0),
+            U_opt,
+            torch.full_like(U_opt, zero_tau),
+        )
+
         self.last_solution = U_opt
 
         if self.live_plot:
             self._plot_plan(s0, U, J, U_opt, dt, ref)
 
+        reached_fraction = float((~active).float().mean().item())
+        mean_rollout_steps = float(
+            control_used.sum(1).float().mean().item()
+        )
+
         return float(U_opt[0].item()), {
             "success": True,
             "cost": float(rho.item()),
+            "goal_reached": False,
+            "reached_fraction": reached_fraction,
+            "mean_rollout_steps": mean_rollout_steps,
         }
 
     def _warm_start(self, N, tau_prev):
         if self.last_solution is None:
-            return torch.full((N,), tau_prev, dtype=self.dtype, device=self.device)
-        return torch.cat([self.last_solution[1:], self.last_solution[-1:]])
+            return torch.full(
+                (N,), tau_prev, dtype=self.dtype, device=self.device
+            )
+
+        return torch.cat(
+            [self.last_solution[1:], self.last_solution[-1:]]
+        )

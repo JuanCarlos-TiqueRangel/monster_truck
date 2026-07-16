@@ -1,25 +1,3 @@
-"""
-wheelie_mppi_torch_rls_nmpc_cost.py
-
-Standard MPPI + physics/RLS model in PyTorch using the same cost structure as the original CasADi NMPC.
-
-MPPI cost, same structure as the original NMPC:
-    J = sum_k (x_k - ref)^T Q (x_k - ref)
-              + r_tau*tau_k^2
-              + r_dtau*(tau_k - tau_{k-1})^2
-        + (x_N - ref)^T Qf (x_N - ref)
-
-    Q  = diag(q_x, q_v, q_theta, q_omega)
-    Qf = diag(q_x, q_v, q_terminal_theta, q_terminal_omega)
-
-RLS model:
-    v_dot     = b_tau*tau + b_v*v + b_abs_v*|v|v + b_tau_cos*tau*cos(theta) + b_0
-    omega_dot = a_g*cos(theta) + a_tau*tau + a_omega*omega + a_v*v + a_0
-
-Run:
-    python3 wheelie_mppi_torch_rls_nmpc_cost.py
-"""
-
 import math
 import os
 from dataclasses import dataclass
@@ -38,12 +16,12 @@ class WheelieParams:
     m: float = 5.1
     l: float = 0.2
     I_body: float = (1.0 / 12.0) * 5.1 * (0.53**2 + 0.30**2)
-    r: float = 0.085
+    r: float = 0.081
     g: float = 9.81
     c_v: float = 9.0
 
-    tau_min: float = -8.0
-    tau_max: float = 12.0
+    tau_min: float = -7.0
+    tau_max: float = 7.0
 
     pitch_ref: float = 80.0
     sim_time: float = 5.0
@@ -57,26 +35,30 @@ class WheelieParams:
 @dataclass
 class MPPIConfig:
     dt: float = 0.1
-    N: int = 30
+    N: int = 20
     num_samples: int = 4096
 
     # MPPI parameters
-    temperature: float = 20.0
-    noise_sigma: float = 1.0
+    temperature: float = 0.2
+    noise_sigma: float = 0.5
 
-    # Same cost weights as the original NMPCConfig
-    q_x: float = 0.0
-    q_v: float = 0.01
-    q_theta: float = 300.0
-    q_omega: float = 15.0
+    # Wheelie tracking cost, scaled like params_mppi.py.
+    q_theta: float = 15.0
+    q_omega: float = 0.5
+    r_dtau: float = 0.1
 
-    r_tau: float = 0.1
-    r_dtau: float = 0.01
+    q_terminal_theta: float = 15.0
+    q_terminal_omega: float = 0.5
 
-    q_terminal_theta: float = 100.0
-    q_terminal_omega: float = 100.0
+    theta_min_deg: float = -90.0
+    theta_max_deg: float = 90.0
 
-
+    # Relative-degree-two control barrier function gains. The safety filter
+    # projects the MPPI torque onto the closest torque satisfying both bounds.
+    cbf_enabled: bool = True
+    cbf_alpha_1: float = 2.0
+    cbf_alpha_2: float = 2.0
+    cbf_margin_deg: float = 5.0
 
     # PyTorch execution
     dtype: torch.dtype = torch.float32
@@ -272,6 +254,68 @@ def rk4_step_torch(state: torch.Tensor, tau: torch.Tensor, dt: float, a: torch.T
     return state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
 
+def pitch_cbf_filter(
+    tau_mppi: float,
+    state: np.ndarray,
+    a_safety: np.ndarray,
+    cfg: MPPIConfig,
+    p: WheelieParams,
+) -> tuple[float, dict]:
+    """Project MPPI torque onto the relative-degree-two pitch-safe set."""
+    _, v, theta, omega = state
+    theta_min = math.radians(cfg.theta_min_deg + cfg.cbf_margin_deg)
+    theta_max = math.radians(cfg.theta_max_deg - cfg.cbf_margin_deg)
+
+    # omega_dot = f(x) + g_tau * tau
+    f_omega = (
+        a_safety[5] * math.cos(theta)
+        + a_safety[7] * omega
+        + a_safety[8] * v
+        + a_safety[9]
+    )
+    g_tau = a_safety[6]
+    if abs(g_tau) < 1.0e-9:
+        raise RuntimeError("CBF safety model has no usable torque authority")
+
+    alpha_sum = cfg.cbf_alpha_1 + cfg.cbf_alpha_2
+    alpha_product = cfg.cbf_alpha_1 * cfg.cbf_alpha_2
+
+    # Upper bound: h = theta_max - theta.
+    # -omega_dot - alpha_sum*omega + alpha_product*h >= 0
+    upper_rhs = f_omega + alpha_sum * omega - alpha_product * (theta_max - theta)
+
+    # Lower bound: h = theta - theta_min.
+    # omega_dot + alpha_sum*omega + alpha_product*h >= 0
+    lower_rhs = -f_omega - alpha_sum * omega - alpha_product * (theta - theta_min)
+
+    safe_tau_min = float(p.tau_min)
+    safe_tau_max = float(p.tau_max)
+    if -g_tau > 0.0:
+        safe_tau_min = max(safe_tau_min, upper_rhs / (-g_tau))
+    else:
+        safe_tau_max = min(safe_tau_max, upper_rhs / (-g_tau))
+
+    if g_tau > 0.0:
+        safe_tau_min = max(safe_tau_min, lower_rhs / g_tau)
+    else:
+        safe_tau_max = min(safe_tau_max, lower_rhs / g_tau)
+
+    feasible = safe_tau_min <= safe_tau_max
+    if feasible:
+        tau_safe = float(np.clip(tau_mppi, safe_tau_min, safe_tau_max))
+    else:
+        # The state is outside the recoverable set under the torque limits.
+        # Apply torque in the direction opposing the active boundary motion.
+        tau_safe = float(p.tau_max if omega >= 0.0 else p.tau_min)
+
+    return tau_safe, {
+        "cbf_active": not math.isclose(tau_safe, tau_mppi, abs_tol=1.0e-9),
+        "cbf_feasible": feasible,
+        "cbf_tau_min": safe_tau_min,
+        "cbf_tau_max": safe_tau_max,
+    }
+
+
 @torch.no_grad()
 def mppi_update_torch(
     state: torch.Tensor,
@@ -284,13 +328,14 @@ def mppi_update_torch(
     p: WheelieParams,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Standard MPPI update using the same cost structure as the original NMPC.
+    Standard MPPI update for wheelie pitch tracking.
 
     Stage cost:
-        e_k^T Q e_k + r_tau*tau_k^2 + r_dtau*(tau_k - tau_{k-1})^2
+        q_theta*e_theta^2 + q_omega*e_omega^2
+        + r_dtau*(tau_k - tau_{k-1})^2
 
     Terminal cost:
-        e_N^T Qf e_N
+        q_terminal_theta*e_theta_N^2 + q_terminal_omega*e_omega_N^2
     """
     K = noise.shape[0]
     u_samples = torch.clamp(u_nominal[None, :] + noise, p.tau_min, p.tau_max)
@@ -305,11 +350,8 @@ def mppi_update_torch(
         du = tau_k - tau_previous
 
         stage_cost = (
-            cfg.q_x * e[:, 0] ** 2
-            + cfg.q_v * e[:, 1] ** 2
-            + cfg.q_theta * e[:, 2] ** 2
+            cfg.q_theta * e[:, 2] ** 2
             + cfg.q_omega * e[:, 3] ** 2
-            + cfg.r_tau * tau_k**2
             + cfg.r_dtau * du**2
         )
 
@@ -319,14 +361,13 @@ def mppi_update_torch(
 
     eN = states - ref[None, :]
     terminal_cost = (
-        cfg.q_x * eN[:, 0] ** 2
-        + cfg.q_v * eN[:, 1] ** 2
-        + cfg.q_terminal_theta * eN[:, 2] ** 2
+        cfg.q_terminal_theta * eN[:, 2] ** 2
         + cfg.q_terminal_omega * eN[:, 3] ** 2
     )
 
+    costs = costs + terminal_cost
     costs = torch.nan_to_num(
-        costs + terminal_cost,
+        costs,
         nan=1.0e20,
         posinf=1.0e20,
         neginf=1.0e20,
@@ -343,9 +384,16 @@ def mppi_update_torch(
 
 
 class WheelieMPPITorch:
-    def __init__(self, p: WheelieParams, cfg: MPPIConfig, seed: int = 0):
+    def __init__(self, p: WheelieParams, cfg: MPPIConfig):
         self.p = p
         self.cfg = cfg
+
+        if cfg.theta_min_deg >= cfg.theta_max_deg:
+            raise ValueError("theta_min_deg must be smaller than theta_max_deg")
+        if cfg.cbf_margin_deg < 0.0:
+            raise ValueError("cbf_margin_deg must be nonnegative")
+        if 2.0 * cfg.cbf_margin_deg >= cfg.theta_max_deg - cfg.theta_min_deg:
+            raise ValueError("cbf_margin_deg leaves no valid pitch-safe interval")
 
         if cfg.device == "cuda" and not torch.cuda.is_available():
             self.device = torch.device("cpu")
@@ -353,8 +401,6 @@ class WheelieMPPITorch:
             self.device = torch.device(cfg.device)
 
         self.dtype = cfg.dtype
-        self.generator = torch.Generator(device=self.device)
-        self.generator.manual_seed(seed)
 
         self.u_nominal = torch.zeros(cfg.N, dtype=self.dtype, device=self.device)
 
@@ -372,6 +418,10 @@ class WheelieMPPITorch:
         cfg = self.cfg
         p = self.p
 
+        ref_theta_deg = math.degrees(float(ref[2]))
+        if not cfg.theta_min_deg <= ref_theta_deg <= cfg.theta_max_deg:
+            raise ValueError("Pitch reference must lie inside the configured angle bounds")
+
         state_t = torch.as_tensor(state, dtype=self.dtype, device=self.device)
         ref_t = torch.as_tensor(ref, dtype=self.dtype, device=self.device)
         tau_prev_t = torch.tensor(tau_prev, dtype=self.dtype, device=self.device)
@@ -381,7 +431,6 @@ class WheelieMPPITorch:
             (cfg.num_samples, cfg.N),
             dtype=self.dtype,
             device=self.device,
-            generator=self.generator,
         )
 
         u_new, costs, weights = mppi_update_torch(
@@ -397,9 +446,24 @@ class WheelieMPPITorch:
 
         tau_cmd = float(torch.clamp(u_new[0], p.tau_min, p.tau_max).detach().cpu().item())
 
-        # Receding horizon shift. This is not a filter; it is standard MPC/MPPI warm start.
+        cbf_info = {
+            "cbf_active": False,
+            "cbf_feasible": True,
+            "cbf_tau_min": float(p.tau_min),
+            "cbf_tau_max": float(p.tau_max),
+        }
+        if cfg.cbf_enabled:
+            # Keep the safety model fixed and auditable. On hardware, replace
+            # this nominal model with experimentally validated conservative bounds.
+            a_safety = nominal_rls_parameters(p)
+            tau_cmd, cbf_info = pitch_cbf_filter(
+                tau_cmd, state, a_safety, cfg, p
+            )
+
+        # Standard receding-horizon warm start. Holding the last optimized value
+        # avoids injecting an artificial jump to zero at the horizon boundary.
         self.u_nominal = torch.cat(
-            [u_new[1:].detach(), torch.zeros(1, dtype=self.dtype, device=self.device)],
+            [u_new[1:].detach(), u_new[-1:].detach()],
             dim=0,
         )
 
@@ -408,6 +472,7 @@ class WheelieMPPITorch:
             "cost_mean": float(torch.mean(costs).detach().cpu().item()),
             "effective_sample_size": float((1.0 / torch.sum(weights**2)).detach().cpu().item()),
             "tau_cmd": tau_cmd,
+            **cbf_info,
         }
         return tau_cmd, info
 
@@ -435,7 +500,7 @@ def simulate_closed_loop() -> None:
     a_rls = a_nom.copy()
     P_rls = 3.0 * np.eye(10)
 
-    plant_has_mismatch = True
+    plant_has_mismatch = False
 
     # Columns:
     # t, x, v, theta, omega, tau, theta_ref,
