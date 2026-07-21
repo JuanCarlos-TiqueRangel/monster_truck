@@ -1,0 +1,5 @@
+"-specs=/home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build/bootloader/specs/picolibc.specs"
+-mlongcalls
+-fno-builtin-memcpy
+-fno-builtin-memset
+-fno-builtin-bzero

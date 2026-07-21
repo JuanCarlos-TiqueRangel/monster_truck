@@ -1,0 +1,20 @@
+Command: ninja all
+[1/9] Performing build step for 'bootloader'
+[1/1] cd /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build/bootloader && /home/juan/.espressif/python_env/idf6.0_py3.12_env/bin/python /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build/bootloader/bootloader.bin
+Bootloader binary size 0x5260 bytes. 0x2da0 bytes (36%) free.
+[2/9] No install step for 'bootloader'
+[3/9] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/receiver.c.obj
+[4/9] Completed 'bootloader'
+[5/9] Linking C static library esp-idf/main/libmain.a
+[6/9] Generating esp-idf/esp_system/ld/sections.ld
+info: Default value for FREERTOS_HZ in sdkconfig is 1000 but it is 100 according to Kconfig.
+Using default value from sdkconfig (1000).
+[7/9] Linking CXX executable receiver.elf
+[8/9] Generating binary image from built executable
+esptool v5.3.1
+Creating ESP32-S3 image...
+Merged 3 ELF sections.
+Successfully created ESP32-S3 image.
+Generated /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build/receiver.bin
+[9/9] cd /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build && /home/juan/.espressif/python_env/idf6.0_py3.12_env/bin/python /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build/partition_table/partition-table.bin /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build/receiver.bin
+receiver.bin binary size 0x9d980 bytes. Smallest app partition is 0x100000 bytes. 0x62680 bytes (38%) free.

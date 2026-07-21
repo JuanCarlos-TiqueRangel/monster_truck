@@ -1,0 +1,2 @@
+source /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build/gdbinit/symbols
+source /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build/gdbinit/connect
