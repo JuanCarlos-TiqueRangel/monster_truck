@@ -33,6 +33,7 @@ PROJECT_ROOT="$(cd .. && pwd)"
 echo "[*] Starting container ${CONTAINER_NAME} from image ${IMAGE_NAME}..."
 docker run -it \
   --gpus all \
+  --privileged \
   --runtime=nvidia \
   --name "${CONTAINER_NAME}" \
   --network host \
