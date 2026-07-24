@@ -11,7 +11,7 @@ import rclpy
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from std_msgs.msg import Float32
-
+from rclpy.executors import MultiThreadedExecutor
 
 _ROOT = Path(__file__).resolve().parent
 for _sub in ("mppi", "gp", "rls", "nmpc"):
@@ -44,8 +44,8 @@ ODOM_TOPIC = "/optitrack/odom"
 DRIVE_TOPIC = "/drive"
 
 CTRL_DT = float(ControllerConfig.dt)
-PRINT_EVERY_N_CONTROLS = 1
-LIVE_PLOT = True
+PRINT_EVERY_N_CONTROLS = 25
+LIVE_PLOT = False
 
 ACCEL_CAP_V = 15.0
 ACCEL_CAP_W = 200.0
@@ -85,10 +85,7 @@ class FlipNode(Node):
         self.ctrl_max = float(self.p.tau_max)
 
         self.rls_parameters = nominal_rls_parameters(self.p)
-        self.rls_covariance = (
-            self.rls_cfg.initial_covariance
-            * np.eye(self.rls_parameters.size, dtype=float)
-        )
+        self.rls_covariance = (self.rls_cfg.initial_covariance * np.eye(self.rls_parameters.size, dtype=float))
         self.rls_info = self._empty_rls_info()
         self.rls_update_count = 0
 
@@ -277,6 +274,7 @@ class FlipNode(Node):
             self._previous_control_odom_time is not None
             and self.optitrack_time <= self._previous_control_odom_time
         ):
+            self.publish_command(self.ctrl_cmd)
             return
 
         state_now = np.array(
@@ -326,7 +324,12 @@ class FlipNode(Node):
 
         tau, info = self.controller.solve(state_now, self.ref, self.tau_prev)
         tau = float(np.clip(tau, self.ctrl_min, self.ctrl_max))
-        applied_tau = self.publish_command(0.5)
+
+        cost_ = float(info["cost"])
+        if abs(cost_) > 200:
+            applied_tau = self.publish_command(tau)
+        else:
+            applied_tau = self.publish_command(0.0)
 
         self._rls_prev_state = state_now.copy()
         self._previous_control_odom_time = self.optitrack_time
@@ -337,12 +340,13 @@ class FlipNode(Node):
         self.ctrl_cmd = applied_tau
         self.solve_success = bool(info["success"])
         self.cost = float(info["cost"])
+        #self.solve_time = info["solve_hz"]
 
         self.logger.record(self.log_row())
 
         if self.control_count % PRINT_EVERY_N_CONTROLS == 0:
             self.get_logger().info(
-                f"t={self.elapsed_time:7.3f} | "
+                #f"solve_time={self.solve_time:7.3f} hz| "
                 f"x={state_now[0]:7.3f} | v={state_now[1]:7.3f} | "
                 f"pitch={math.degrees(state_now[2]):8.2f} deg | "
                 f"omega={state_now[3]:8.3f} | "

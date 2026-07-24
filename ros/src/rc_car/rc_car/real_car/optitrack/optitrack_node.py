@@ -106,7 +106,7 @@ class OptiTrackOdometryNode(Node):
 
         self.declare_parameter("frame_id", "map")
         self.declare_parameter("child_frame_id", "base_link")
-        self.declare_parameter("publish_hz", 200.0)
+        self.declare_parameter("publish_hz", 300.0)
 
         # If True: publish twist in BODY frame (base_link). If False: WORLD frame.
         self.declare_parameter("twist_in_body_frame", True)

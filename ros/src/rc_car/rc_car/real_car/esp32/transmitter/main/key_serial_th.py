@@ -133,7 +133,7 @@ def control_loop(link, controller, period=0.01):
         link.disarm()
 
 
-def teleop(link, step=100):
+def teleop(link, step=50):
     """Keyboard drive. Resends at 50 Hz so the esp's 300 ms
     deadman never trips while a key is held or idle."""
     old_terminal = termios.tcgetattr(sys.stdin)
@@ -184,14 +184,8 @@ def teleop(link, step=100):
                 flush=True,
             )
     finally:
-        termios.tcsetattr(
-            sys.stdin,
-            termios.TCSADRAIN,
-            old_terminal,
-        )
-
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_terminal,)
         print()
-
         link.send(0.0, 0.0)
         link.disarm()
 

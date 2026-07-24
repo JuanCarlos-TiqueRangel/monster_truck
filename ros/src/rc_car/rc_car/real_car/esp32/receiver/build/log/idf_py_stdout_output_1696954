@@ -1,0 +1,63 @@
+Command: ninja all
+[0/1] Re-running CMake...
+-- Component directory /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/mqtt does not contain a CMakeLists.txt file. No component will be added
+-- Minimal build - ON
+-- Building ESP-IDF components for target esp32s3
+-- ESP-TEE is currently supported only on the esp32c6;esp32h2;esp32c5;esp32c61 SoCs
+-- KCONFIG_REPORT_VERBOSITY not set, using default
+-- Project sdkconfig file /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/sdkconfig
+-- Compiler supported targets: xtensa-esp-elf
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- App "receiver" version: 1164907-dirty
+-- Setting up mbedtls configuration
+-- Linkage type is PUBLIC
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_wdt/esp32s3/rom.wdt.ld
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_system/ld/esp32s3/memory.ld.in
+--   -> Preprocessing .in script: /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_system/ld/esp32s3/memory.ld.in
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_system/ld/esp32s3/sections.ld.in
+--   -> Preprocessing .in script: /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_system/ld/esp32s3/sections.ld.in
+--   -> Applying ldgen processing: /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build/esp-idf/esp_system/ld/sections.ld.in
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.ld
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.api.ld
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.bt_funcs.ld
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.libgcc.ld
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.version.ld
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.ble_master.ld
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.ble_50.ld
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.ble_smp.ld
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.ble_dtm.ld
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.ble_test.ld
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.ble_scan.ld
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.libc.ld
+-- Adding linker script /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/soc/esp32s3/ld/esp32s3.peripherals.ld
+-- Components: app_update bootloader bootloader_support cxx efuse esp_app_format esp_blockdev esp_bootloader_format esp_coex esp_common esp_driver_dma esp_driver_gpio esp_driver_ledc esp_driver_uart esp_driver_usb_serial_jtag esp_event esp_hal_ana_conv esp_hal_clock esp_hal_dma esp_hal_gpio esp_hal_gpspi esp_hal_i2s esp_hal_ledc esp_hal_mspi esp_hal_pmu esp_hal_rtc_timer esp_hal_security esp_hal_timg esp_hal_touch_sens esp_hal_uart esp_hal_usb esp_hal_wdt esp_hw_support esp_libc esp_mm esp_netif esp_netif_stack esp_partition esp_phy esp_pm esp_psram esp_ringbuf esp_rom esp_security esp_stdio esp_system esp_timer esp_usb_cdc_rom_console esp_wifi esptool_py freertos hal heap log lwip main mbedtls nvs_flash nvs_sec_provider partition_table pthread soc spi_flash vfs wpa_supplicant xtensa
+-- Component paths: /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/app_update /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/bootloader /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/bootloader_support /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/cxx /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/efuse /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_app_format /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_blockdev /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_bootloader_format /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_coex /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_common /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_driver_dma /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_driver_gpio /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_driver_ledc /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_driver_uart /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_driver_usb_serial_jtag /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_event /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_ana_conv /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_clock /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_dma /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_gpio /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_gpspi /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_i2s /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_ledc /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_mspi /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_pmu /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_rtc_timer /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_security /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_timg /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_touch_sens /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_uart /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_usb /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hal_wdt /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_hw_support /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_libc /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_mm /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_netif /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_netif_stack /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_partition /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_phy /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_pm /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_psram /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_ringbuf /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_rom /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_security /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_stdio /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_system /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_timer /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_usb_cdc_rom_console /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esp_wifi /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/esptool_py /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/freertos /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/hal /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/heap /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/log /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/lwip /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/main /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/mbedtls /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/nvs_flash /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/nvs_sec_provider /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/partition_table /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/pthread /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/soc /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/spi_flash /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/vfs /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/wpa_supplicant /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/xtensa
+-- Configuring done (2.6s)
+-- Generating done (0.1s)
+-- Build files have been written to: /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build
+[1/9] Building C object esp-idf/esp_app_format/CMakeFiles/__idf_esp_app_format.dir/esp_app_desc.c.obj
+[2/9] Performing build step for 'bootloader'
+[1/1] cd /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build/bootloader && /home/juan/.espressif/python_env/idf6.0_py3.12_env/bin/python /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build/bootloader/bootloader.bin
+Bootloader binary size 0x5260 bytes. 0x2da0 bytes (36%) free.
+[3/9] Linking C static library esp-idf/esp_app_format/libesp_app_format.a
+[4/9] No install step for 'bootloader'
+[5/9] Completed 'bootloader'
+[6/9] Generating esp-idf/esp_system/ld/sections.ld
+info: Default value for FREERTOS_HZ in sdkconfig is 1000 but it is 100 according to Kconfig.
+Using default value from sdkconfig (1000).
+[7/9] Linking CXX executable receiver.elf
+[8/9] Generating binary image from built executable
+esptool v5.3.1
+Creating ESP32-S3 image...
+Merged 3 ELF sections.
+Successfully created ESP32-S3 image.
+Generated /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build/receiver.bin
+[9/9] cd /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build && /home/juan/.espressif/python_env/idf6.0_py3.12_env/bin/python /home/juan/lehigh_PhD/esp32/esp/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build/partition_table/partition-table.bin /home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/receiver/build/receiver.bin
+receiver.bin binary size 0x9d9f0 bytes. Smallest app partition is 0x100000 bytes. 0x62610 bytes (38%) free.
