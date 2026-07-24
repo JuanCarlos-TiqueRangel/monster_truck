@@ -56,12 +56,13 @@ class DriveNode(Node):
 
     def on_drive(self, msg):
         if not math.isfinite(msg.data):
-            self.get_logger().error(
-                f"rejected non-finite command: {msg.data}"
-            )
+            self.get_logger().error(f"rejected non-finite command: {msg.data}")
             return
+        
+        max_torque = 8.0
+        command = msg.data / max_torque
 
-        self.throttle = max(-1.0, min(1.0, msg.data))
+        self.throttle = max(-1.0, min(1.0, command))
         self.last_command = time.monotonic()
 
         if not self.armed:
@@ -76,6 +77,8 @@ class DriveNode(Node):
             value = int(round(self.throttle * 1000))
 
         self.ser.write(f"{value} 0\n".encode())
+
+        print(f"\rwire {value:5d}   pulse {1500 + value // 2:4d} us", end="", flush=True)
 
         pending = self.ser.in_waiting
 

@@ -15,8 +15,8 @@ class WheelieParams:
     g: float = 9.81
     c_v: float = 9.0
 
-    tau_min: float = -1.0
-    tau_max: float = 1.0
+    tau_min: float = -8.0
+    tau_max: float = 8.0
 
     theta_min: float = math.radians(-180.0)
     theta_max: float = math.radians(180.0)

@@ -1,7 +1,7 @@
 {
     "version":            "1.3",
     "project_name":       "transmitter_serial",
-    "project_version":    "55f02e4",
+    "project_version":    "1164907-dirty",
     "project_path":       "/home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/transmitter",
     "idf_path":           "/home/juan/lehigh_PhD/esp32/esp/esp-idf",
     "build_dir":          "/home/juan/lehigh_PhD/monster_truck/ros/src/rc_car/rc_car/real_car/esp32/transmitter/build",
