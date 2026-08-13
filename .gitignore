@@ -19,6 +19,7 @@ repo-backup.bundle
 *.npz
 *.pyc
 *.txt
+*.zip
 
 # folder acados
 /NMPC/acados/
