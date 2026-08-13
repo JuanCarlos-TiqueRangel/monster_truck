@@ -55,7 +55,7 @@ PRINT_EVERY_N_CONTROLS = 1
 
 # Episodic learning: the GP (and RLS) persist across episodes, the MuJoCo state is
 # reset each episode. Episode 1 learns where the obstacle is; episode 2 reuses that.
-N_EPISODES = 50
+N_EPISODES = 100
 
 # GP settings
 LOAD_MODEL = False    # True = RESUME from a saved model (GP posterior + RLS state)
@@ -64,7 +64,7 @@ GP_ENABLED = True     # False = ZERO the GP's contribution (RLS-only control; GP
 LIVE_PLOT = True          # True = live X-vs-theta plot of the MPPI plan while the sim runs
 
 # RLS settings. RLS_FREEZE=True holds a_rls at the nominal physics values
-RLS_FREEZE = False
+RLS_FREEZE = True
 FORGETTING_FACTOR = 0.9995   # < 1 keeps the fit adaptive
 INITIAL_COVARIANCE = 3.0     # prior uncertainty on the weights
 SIGMA_V_DOT = 2.0            # measurement-noise std, v_dot channel
@@ -568,12 +568,35 @@ class ObstacleNode:
 
 def main():
     node = ObstacleNode()
+
     if RENDER:
         with mj_viewer.launch_passive(node.model, node.data) as viewer:
+
+            # Initial camera position only
+            viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+            viewer.cam.azimuth = 90.0
+            viewer.cam.elevation = -25.0
+            viewer.cam.distance = 5.0
+            viewer.cam.lookat[:] = [2.0, 0.0, 0.1]
+
+            viewer.sync()
+
             node.run(viewer)
+
     else:
         node.run()
+
     node.finish()
+
+
+# def main():
+#     node = ObstacleNode()
+#     if RENDER:
+#         with mj_viewer.launch_passive(node.model, node.data) as viewer:
+#             node.run(viewer)
+#     else:
+#         node.run()
+#     node.finish()
 
 
 if __name__ == "__main__":

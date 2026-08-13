@@ -59,7 +59,7 @@ def nominal_a_g():
 
 def main():
     here = Path(__file__).parent
-    path = Path(sys.argv[1]) if len(sys.argv) > 1 else here / "obstacle_mujoco.csv"
+    path = Path(sys.argv[1]) if len(sys.argv) > 1 else here / "obstacle_mujoco_1000.csv"
     if not path.exists():
         raise SystemExit(f"CSV not found: {path}\nRun obstacle_mujoco_simulation.py first.")
 

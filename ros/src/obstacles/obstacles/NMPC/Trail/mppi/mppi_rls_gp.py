@@ -246,6 +246,35 @@ class MPPITorch:
         return s
 
 
+    def _step_to_goal(self, s, tau, dt, goal_x):
+        """Propagate one step and terminate exactly at the forward x goal."""
+        goal_x = torch.as_tensor(goal_x, dtype=s.dtype, device=s.device)
+        candidate = self._step(s, tau, dt)
+        reached = candidate[:, 0] >= goal_x
+
+        dx = candidate[:, 0] - s[:, 0]
+        safe_dx = torch.where(
+            dx.abs() > 1e-9, dx, torch.ones_like(dx)
+        )
+        alpha = ((goal_x - s[:, 0]) / safe_dx).clamp(0.0, 1.0)
+        at_goal = s + alpha.unsqueeze(1) * (candidate - s)
+
+        at_goal = torch.stack(
+            [
+                torch.full_like(at_goal[:, 0], goal_x),
+                at_goal[:, 1],
+                at_goal[:, 2],
+                at_goal[:, 3],
+            ],
+            dim=-1,
+        )
+
+        s_next = torch.where(
+            reached.unsqueeze(1), at_goal, candidate
+        )
+        return s_next, reached
+
+
     # def _stage_cost(self, s, tau, tau_prev, ref):
     #         cfg, p = self.cfg, self.p
     #         x, v, theta, omega = s[:, 0], s[:, 1], s[:, 2], s[:, 3]
@@ -283,7 +312,7 @@ class MPPITorch:
         d_tau = tau - tau_prev
 
         theta_deg = torch.rad2deg(theta)
-        too_much_wheelie = torch.relu((-theta_deg) - 75.0)
+        too_much_wheelie = torch.relu((-theta_deg) - 65.0)
         nose_down = torch.relu(theta_deg)
 
         cost_goal = cfg.q_x * e_x**2
@@ -299,7 +328,7 @@ class MPPITorch:
             cost_goal
             #+ cost_speed
             + cost_pitch
-            + cost_pitch_rate
+            #+ cost_pitch_rate
             # + cost_torque
             + cost_smooth
         )
@@ -401,7 +430,7 @@ class MPPITorch:
             #+ terminal_cost_v
             + terminal_cost_pitch
             #+ terminal_cost_omega
-            + cost_progress_terminal
+            #+ cost_progress_terminal
         )
 
         J = torch.nan_to_num(

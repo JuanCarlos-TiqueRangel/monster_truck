@@ -42,18 +42,18 @@ XML_PATH = _ROOT.parent / "monster_truck_flip_2d.xml"
 # Generated outputs (CSV log + model checkpoint) go in results/ to keep the source tree clean.
 RESULTS_DIR = _ROOT / "results"
 RESULTS_DIR.mkdir(exist_ok=True)
-CSV_PATH = RESULTS_DIR / "obstacle_mujoco.csv"
-MODEL_PATH = RESULTS_DIR / "obstacle_model.npz"
+CSV_PATH = RESULTS_DIR / "wheelie_mujoco.csv"
+MODEL_PATH = RESULTS_DIR / "wheelie_model.npz"
 
 RENDER   = True       # True = watch the truck; False = fast headless run
 CTRL_DT  = ControllerConfig.dt       # control / MPPI period [s]
 INIT_Z   = 0.1512     # spawn height
-SIM_TIME = 20.0       # per-episode time cap [s]
+SIM_TIME = 10.0       # per-episode time cap [s]
 PRINT_EVERY_N_CONTROLS = 1
 
 # Episodic learning: the GP (and RLS) persist across episodes, the MuJoCo state is
-# reset each episode. Episode 1 learns where the obstacle is; episode 2 reuses that.
-N_EPISODES = 20
+# reset each episode. Episode 1 learns where the wheelie is; episode 2 reuses that.
+N_EPISODES = 1
 
 LIVE_PLOT = True          # True = live X-vs-theta plot of the MPPI plan while the sim runs
 
@@ -93,12 +93,12 @@ class EpisodeLogger:
 
 
 # ============================================================
-# ObstacleNode -- the node. Sets up the MuJoCo plant directly: the sensor reads and the
+# wheelieNode -- the node. Sets up the MuJoCo plant directly: the sensor reads and the
 # actuator command are its own methods (the "topics"). run() loops the episodes, stepping
 # the plant and running one control update every CTRL_DT.
 # ============================================================
 
-class ObstacleNode:
+class wheelieNode:
     def __init__(self):
         # --- MuJoCo plant ---
         self.model = mujoco.MjModel.from_xml_path(str(XML_PATH))
@@ -140,20 +140,20 @@ class ObstacleNode:
                                 integrator="rk4",
                                 live_plot=(LIVE_PLOT and RENDER)
                                 )
-            self.controller.plot_obstacle_span = (1.7, 2.3)   # obstacle x-span shaded in the plan plot
+            self.controller.plot_wheelie_span = (1.7, 2.3)   # wheelie x-span shaded in the plan plot
         else:  # nmpc
             self.controller = Controller(
                                 self.p,
                                 self.cfg,
                                 live_plot=(LIVE_PLOT and RENDER),
                             )
-            self.controller.plot_obstacle_span = (1.7, 2.3)
+            self.controller.plot_wheelie_span = (1.7, 2.3)
 
 
         print(f"[controller] {CONTROLLER}")
 
         # Reference = [x, v, theta, omega].
-        self.ref = np.array([0.0, 0.0, -1.236, 0.0], dtype=float)
+        self.ref = np.array([0.0, 0.0, np.deg2rad(-70), 0.0], dtype=float)
 
         # --- per-episode bookkeeping (reset by reset_episode each episode) ---
         self._prev_omega = None           # previous gyro pitch rate, for the omega_dot difference
@@ -432,7 +432,7 @@ class ObstacleNode:
 # ============================================================
 
 def main():
-    node = ObstacleNode()
+    node = wheelieNode()
     if RENDER:
         with mj_viewer.launch_passive(node.model, node.data) as viewer:
             node.run(viewer)

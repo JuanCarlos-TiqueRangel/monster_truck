@@ -20,6 +20,25 @@ def nominal_rls_parameters(p):
         dtype=float,
     )
 
+# def nominal_rls_parameters(p):
+#     return np.array(
+#         [
+#             0.9174522005394272, 
+#             -0.15602752169303555, 
+#             -0.0010575458789035366, 
+#             0.9174591656357874, 
+#             -0.006135261370925543, 
+#             -0.0006131802978342079, 
+#             -0.0005922600395190596, 
+#             -3.8773552823784714, 
+#             0.0014680485093992288, 
+#             -0.0006132091490521059
+#         ],
+#         dtype=float,
+#     )
+
+
+
 
 def rls_update(
     state_prev,
@@ -69,9 +88,14 @@ def rls_update(
         dtype=float,
     )
 
-    H = np.zeros((2, 10), dtype=float)
-    H[0, 0:5] = phi_v
-    H[1, 5:10] = phi_w
+    # shape of the featured-vectors of v_dot
+    v_dot_shape = phi_v.shape[0]
+
+    # 3) Block regression matrix H. a = [a_v(5), a_w(5)] -> 10 params.
+    n = a.shape[0]
+    H = np.zeros((2, n), dtype=float)
+    H[0, 0:v_dot_shape] = phi_v
+    H[1, v_dot_shape:n] = phi_w
 
     y_hat_before = H @ a
     error = y - y_hat_before

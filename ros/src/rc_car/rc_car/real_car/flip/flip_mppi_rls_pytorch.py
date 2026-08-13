@@ -41,6 +41,7 @@ CSV_PATH = RESULTS_DIR / "flip_ros.csv"
 MODEL_PATH = RESULTS_DIR / "flip_rls_model.npz"
 
 ODOM_TOPIC = "/optitrack/odom"
+# ODOM_TOPIC = "/mujoco/odom"
 DRIVE_TOPIC = "/drive"
 
 CTRL_DT = float(ControllerConfig.dt)
@@ -193,7 +194,7 @@ class FlipNode(Node):
         if current_time <= 0.0:
             current_time = self.get_clock().now().nanoseconds * 1e-9
 
-        pitch_wrapped = math.atan2(
+        pitch = math.atan2(
             2.0 * (qx * qz + qw * qy),
             1.0 - 2.0 * (qy * qy + qz * qz),
         )
@@ -201,17 +202,17 @@ class FlipNode(Node):
         # ============================================================
         # Unwrapped pitch
         # ============================================================
-        if self._previous_wrapped_pitch is None:
-            self._unwrapped_pitch = pitch_wrapped
-        else:
-            delta_pitch = math.atan2(
-                math.sin(pitch_wrapped - self._previous_wrapped_pitch),
-                math.cos(pitch_wrapped - self._previous_wrapped_pitch),
-            )
-            self._unwrapped_pitch += delta_pitch
+        # if self._previous_wrapped_pitch is None:
+        #     self._unwrapped_pitch = pitch_wrapped
+        # else:
+        #     delta_pitch = math.atan2(
+        #         math.sin(pitch_wrapped - self._previous_wrapped_pitch),
+        #         math.cos(pitch_wrapped - self._previous_wrapped_pitch),
+        #     )
+        #     self._unwrapped_pitch += delta_pitch
 
-        self._previous_wrapped_pitch = pitch_wrapped
-        pitch = float(self._unwrapped_pitch)
+        # self._previous_wrapped_pitch = pitch_wrapped
+        # pitch = float(self._unwrapped_pitch)
 
         if (
             self._previous_odom_time is None

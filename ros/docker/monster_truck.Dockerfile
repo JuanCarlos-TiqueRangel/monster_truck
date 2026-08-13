@@ -62,6 +62,9 @@ RUN python3 -m pip install --no-cache-dir \
     casadi \
     pymavlink \
     mujoco \
+    gymnasium \
+    "stable_baselines3[extra]" \
+    tensorboard \
     numba \
     pandas
 

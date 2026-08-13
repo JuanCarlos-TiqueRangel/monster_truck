@@ -15,8 +15,8 @@ class WheelieParams:
     g: float = 9.81
     c_v: float = 9.0
 
-    tau_min: float = -7.0
-    tau_max: float = 7.0
+    tau_min: float = -5.0
+    tau_max: float = 5.0
 
     theta_min: float = math.radians(-180.0)
     theta_max: float = math.radians(180.0)
@@ -34,8 +34,8 @@ class WheelieParams:
 
 @dataclass
 class MPPIConfig:
-    dt: float = 0.05
-    N: int = 15
+    dt: float = 0.015
+    N: int = 20
 
     # Stage/Running cost weights 
     q_x: float = 1.5
@@ -53,8 +53,8 @@ class MPPIConfig:
     ipopt_max_iter: int = 50
 
     q_gp_var: float = 0.0
-    K: int = 5000            # number of sampled rollouts
-    SIGMA: float = 15.0        # exploration std on tau
+    K: int = 10000            # number of sampled rollouts
+    SIGMA: float = 40.0        # exploration std on tau
     LAM: float = 1.6           # temperature (softmin sharpness)
 
     goal_tol_x: float = 0.10

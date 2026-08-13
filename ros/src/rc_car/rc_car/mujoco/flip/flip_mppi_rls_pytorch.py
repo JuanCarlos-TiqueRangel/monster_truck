@@ -42,8 +42,8 @@ XML_PATH = _ROOT.parent / "monster_truck_flip_2d.xml"
 # Generated outputs (CSV log + model checkpoint) go in results/ to keep the source tree clean.
 RESULTS_DIR = _ROOT / "results"
 RESULTS_DIR.mkdir(exist_ok=True)
-CSV_PATH = RESULTS_DIR / "obstacle_mujoco.csv"
-MODEL_PATH = RESULTS_DIR / "obstacle_model.npz"
+CSV_PATH = RESULTS_DIR / "flip_mujoco.csv"
+MODEL_PATH = RESULTS_DIR / "flip_model.npz"
 
 RENDER   = True       # True = watch the truck; False = fast headless run
 CTRL_DT  = ControllerConfig.dt       # control / MPPI period [s]
@@ -52,9 +52,9 @@ PRINT_EVERY_N_CONTROLS = 1
 
 # Episodic learning: the GP (and RLS) persist across episodes, the MuJoCo state is
 # reset each episode. Episode 1 learns where the obstacle is; episode 2 reuses that.
-N_EPISODES = 20
+N_EPISODES = 1
 
-LIVE_PLOT = True          # True = live X-vs-theta plot of the MPPI plan while the sim runs
+LIVE_PLOT = False          # True = live X-vs-theta plot of the MPPI plan while the sim runs
 
 # Outlier gate: skip a step if the measured accel is bigger than this (contact impact).
 ACCEL_CAP_V = 15.0           # m/s^2
@@ -348,6 +348,11 @@ class ObstacleNode:
         tau, info = self._solve(state_now)
         tau = float(np.clip(tau, self.p.tau_min, self.p.tau_max))
         ctrl = float(np.clip(tau, self.ctrl_min, self.ctrl_max))
+
+        # if state_now[2] >= np.deg2rad(359.0) or abs(state_now[2]) < 0.3:
+        #     ctrl = 0.0
+        #     tau = 0.0
+
         self.publish_command(ctrl)
 
         self.tau_prev = tau
@@ -464,12 +469,36 @@ class ObstacleNode:
 
 def main():
     node = ObstacleNode()
+
     if RENDER:
         with mj_viewer.launch_passive(node.model, node.data) as viewer:
+
+            # Initial camera position only
+            viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+            viewer.cam.azimuth = 90.0
+            viewer.cam.elevation = -25.0
+            viewer.cam.distance = 2.5
+            viewer.cam.lookat[:] = [0.0, 0.0, 0.1]
+
+            viewer.sync()
+
             node.run(viewer)
+
     else:
         node.run()
+
     node.finish()
+
+
+
+# def main():
+#     node = ObstacleNode()
+#     if RENDER:
+#         with mj_viewer.launch_passive(node.model, node.data) as viewer:
+#             node.run(viewer)
+#     else:
+#         node.run()
+#     node.finish()
 
 
 if __name__ == "__main__":

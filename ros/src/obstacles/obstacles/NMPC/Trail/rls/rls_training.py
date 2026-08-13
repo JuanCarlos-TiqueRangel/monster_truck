@@ -50,38 +50,39 @@ HELD_ANGLES = (25.0, 45.0, 60.0, 72.0, -25.0, -45.0, -60.0, -72.0)
 # HELD_ANGLES = (-25.0, -45.0, -60.0, -72.0)
 
 # The weight names, in the order rls.py uses them.
-WEIGHT_NAMES = ["b_tau", 
-                "b_v", 
-                "b_abs_v", 
-                "b_tau_cos", 
-                "b_tanh", 
-                "b_omega_cos", 
-                "b_0",
-
-                "a_g", 
-                "a_tau", 
-                "a_omega", 
-                "a_v", 
-                "a_absw_w", 
-                "a_v_omega", 
-                "a_absv_w", 
-                "a_cos_omega", 
-                "a_sin_v",
-                "a_sin",
-                "a_cos_v",
-                "a_tau_v",
-                "a_0"]
-
 # WEIGHT_NAMES = ["b_tau", 
 #                 "b_v", 
+#                 "b_abs_v", 
 #                 "b_tau_cos", 
+#                 "b_tanh", 
+#                 "b_omega_cos", 
 #                 "b_0",
 
 #                 "a_g", 
 #                 "a_tau", 
 #                 "a_omega", 
 #                 "a_v", 
+#                 "a_absw_w", 
+#                 "a_v_omega", 
+#                 "a_absv_w", 
+#                 "a_cos_omega", 
+#                 "a_sin_v",
+#                 "a_sin",
+#                 "a_cos_v",
+#                 "a_tau_v",
 #                 "a_0"]
+
+WEIGHT_NAMES = ["b_tau", 
+                "b_v", 
+                "b_v_absv"
+                "b_tau_cos", 
+                "b_0",
+
+                "a_g", 
+                "a_tau", 
+                "a_omega", 
+                "a_v", 
+                "a_0"]
 
 # WEIGHT_NAMES = _WEIGHT_NAMES
 

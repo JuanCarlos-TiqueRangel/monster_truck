@@ -173,7 +173,7 @@ class MPPITorch:
             cost_torque     = cfg.r_tau   * tau     ** 2
             cost_smooth     = cfg.r_dtau  * d_tau   ** 2
 
-            return (+ cost_goal
+            return (#+ cost_goal
                     #+ cost_pitch_deg 
                     + cost_pitch
                     + cost_torque

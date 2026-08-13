@@ -118,8 +118,8 @@ def rls_dynamics_torch(
 
     # Unilateral ground contact: at theta == 0 the floor prevents the
     # predicted chassis from rotating nose-down into positive pitch.
-    # on_ground = (theta >= 0.0) & (omega_dot > 0.0)
-    # omega_dot = torch.where(on_ground, torch.zeros_like(omega_dot), omega_dot)
+    on_ground = (theta >= 0.0) & (omega_dot > 0.0)
+    omega_dot = torch.where(on_ground, torch.zeros_like(omega_dot), omega_dot)
 
     return torch.stack([x_dot, v_dot, theta_dot, omega_dot], dim=-1)
 

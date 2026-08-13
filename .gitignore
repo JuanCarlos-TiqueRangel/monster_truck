@@ -7,11 +7,18 @@
 *.bundle
 repo-backup.bundle
 
+# ignore videos or images
+*.mp4
+*.mov
+*.png
+*.jpg
+
 # Ignore CSV files, pytorch and npz models
 *.csv
 *.pt
 *.npz
 *.pyc
+*.txt
 
 # folder acados
 /NMPC/acados/
