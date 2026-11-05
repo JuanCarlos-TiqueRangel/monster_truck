@@ -22,6 +22,10 @@ repo-backup.bundle
 *.zip
 *.pack
 
+# RL files and bagfiles
+*.0
+*.mcap
+
 # folder acados
 /NMPC/acados/
 
