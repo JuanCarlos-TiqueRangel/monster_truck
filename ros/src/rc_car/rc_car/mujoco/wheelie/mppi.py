@@ -30,6 +30,8 @@ class MPPITorch:
             rls_parameters, dtype=self.dtype, device=self.device
         ).clone()
 
+        self.last_solution = None
+
         # Plot
         # --- live plan plot (optional; one figure, updated each solve) ---
         self.live_plot = bool(live_plot)     # draw the planned-trajectory figure each solve

@@ -18,7 +18,11 @@ import pandas as pd
 
 FLIP_CSV = Path("flip/results/flip_mujoco.csv")
 WHEELIE_CSV = Path("wheelie/results/wheelie_mujoco.csv")
-OUTPUT_FILE = Path("wheelie_flip_acceleration_results.pdf")
+OUTPUT_FILE = Path("plots/wheelie_flip_acceleration_results.pdf")
+
+# Choose "all" for pitch, accelerations, and control input.
+# Choose "pitch_control" for only pitch and control input.
+PLOT_MODE = "pitch_control"
 
 # Use None to select the last available episode in each file.
 FLIP_EPISODE = None
@@ -43,15 +47,32 @@ PITCH_TOLERANCE_DEG = 5.0
 
 # Five RLS updates correspond to approximately 0.10 s for these logs.
 # Set this to 1 to plot the logged acceleration values without smoothing.
-ACCELERATION_SMOOTHING_SAMPLES = 5
-ACCELERATION_BAND_STANDARD_DEVIATIONS = 1.0
-ACCELERATION_BAND_ALPHA = 0.15
+WHEELIE_ACCELERATION_SMOOTHING_SAMPLES = 10
+FLIP_ACCELERATION_SMOOTHING_SAMPLES = 10
+
+WHEELIE_ACCELERATION_BAND_STANDARD_DEVIATIONS = 0.8
+FLIP_ACCELERATION_BAND_STANDARD_DEVIATIONS = 0.3
+
+WHEELIE_ACCELERATION_BAND_ALPHA = 0.1
+FLIP_ACCELERATION_BAND_ALPHA = 0.2
+
+# Robust spike filters for WHEELIE accelerations only.
+# Five RLS updates are approximately 0.10 s for these logs.
+# Set either median-filter value to 1 to disable that filter.
+WHEELIE_ANGULAR_ACCELERATION_MEDIAN_FILTER_SAMPLES = 5
+WHEELIE_LINEAR_ACCELERATION_MEDIAN_FILTER_SAMPLES = 10
+
+# Optional absolute rejection limits for wheelie accelerations.
+# Values outside +/- the configured limit are replaced by interpolation
+# before the regular centered-mean smoothing. Set to None to disable.
+WHEELIE_ANGULAR_ACCELERATION_MAX_ABS = None  # rad/s^2
+WHEELIE_LINEAR_ACCELERATION_MAX_ABS = None   # m/s^2
 
 # Display-only smoothing for dense 1 kHz signals.
 PITCH_SMOOTHING_SECONDS = 0.1
-TORQUE_SMOOTHING_SECONDS = 0.20
-TORQUE_BAND_STANDARD_DEVIATIONS = 1.0
-TORQUE_BAND_ALPHA = 0.20
+TORQUE_SMOOTHING_SECONDS = 0.5
+TORQUE_BAND_STANDARD_DEVIATIONS = 0.3
+TORQUE_BAND_ALPHA = 0.10
 
 SHOW_RMSE = False
 SHOW_PLOT = True
@@ -65,8 +86,8 @@ ANGULAR_ESTIMATED_COLOR = "#7B61A8"
 LINEAR_MEASURED_COLOR = "#356C67"
 LINEAR_ESTIMATED_COLOR = "#009E73"
 TORQUE_COLOR = "#C74440"
-PANEL_COLOR = "#F0EFEF"
-GRID_COLOR = "#FAFAFA"
+PANEL_COLOR = "#FBFAFA"
+GRID_COLOR = "#E9E9E9"
 ZERO_LINE_COLOR = "#A8A8A8"
 
 
@@ -134,22 +155,55 @@ def load_episode(file_path, requested_episode):
     return episode_data, episode
 
 
-def smooth_signal_and_band(values):
+def filter_acceleration_spikes(values, median_filter_samples=1, max_abs=None):
+    """Remove impulsive acceleration spikes before display smoothing.
+
+    A centered rolling median suppresses isolated spikes without letting one large
+    sample pull the neighboring values as strongly as a moving mean would.
+    Optionally, values outside +/- max_abs are treated as invalid and replaced
+    by linear interpolation between the neighboring valid samples.
+    """
+    values = pd.Series(values, dtype=float).copy()
+
+    if max_abs is not None:
+        values[values.abs() > max_abs] = np.nan
+        values = values.interpolate(limit_direction="both")
+
+    if median_filter_samples is None or median_filter_samples <= 1:
+        return values.to_numpy(dtype=float)
+
+    # Prefer an odd window so the median is centered on the current sample.
+    median_filter_samples = int(median_filter_samples)
+    if median_filter_samples % 2 == 0:
+        median_filter_samples += 1
+
+    return (
+        values.rolling(
+            median_filter_samples,
+            center=True,
+            min_periods=1,
+        )
+        .median()
+        .to_numpy(dtype=float)
+    )
+
+
+def smooth_signal_and_band(values, smoothing_samples, band_standard_deviations):
     """Return a centered mean and local mean +/- standard-deviation band."""
     values = pd.Series(values, dtype=float)
 
-    if ACCELERATION_SMOOTHING_SAMPLES <= 1:
+    if smoothing_samples <= 1:
         values = values.to_numpy(dtype=float)
         return values, values, values
 
     rolling = values.rolling(
-        ACCELERATION_SMOOTHING_SAMPLES,
+        smoothing_samples,
         center=True,
         min_periods=1,
     )
     mean = rolling.mean().to_numpy(dtype=float)
     standard_deviation = rolling.std(ddof=0).fillna(0.0).to_numpy(dtype=float)
-    half_width = ACCELERATION_BAND_STANDARD_DEVIATIONS * standard_deviation
+    half_width = band_standard_deviations * standard_deviation
     return mean, mean - half_width, mean + half_width
 
 
@@ -204,7 +258,15 @@ def centered_time_mean_and_band(time, values, window_seconds, band_std):
     return mean, mean - half_width, mean + half_width
 
 
-def acceleration_signals(data, measured_column, estimated_column):
+def acceleration_signals(
+    data,
+    measured_column,
+    estimated_column,
+    smoothing_samples,
+    band_standard_deviations,
+    median_filter_samples=1,
+    max_abs=None,
+):
     """Return one measured/estimated acceleration pair per RLS update."""
     update_count = data[RLS_UPDATE_COUNT_COLUMN].to_numpy(dtype=float)
     previous_count = np.r_[np.nan, update_count[:-1]]
@@ -214,8 +276,28 @@ def acceleration_signals(data, measured_column, estimated_column):
     measured = data.loc[update_rows, measured_column].to_numpy(dtype=float)
     estimated = data.loc[update_rows, estimated_column].to_numpy(dtype=float)
 
-    measured, measured_lower, measured_upper = smooth_signal_and_band(measured)
-    estimated, estimated_lower, estimated_upper = smooth_signal_and_band(estimated)
+    # Apply the robust spike filter BEFORE the regular centered-mean smoothing.
+    measured = filter_acceleration_spikes(
+        measured,
+        median_filter_samples=median_filter_samples,
+        max_abs=max_abs,
+    )
+    estimated = filter_acceleration_spikes(
+        estimated,
+        median_filter_samples=median_filter_samples,
+        max_abs=max_abs,
+    )
+
+    measured, measured_lower, measured_upper = smooth_signal_and_band(
+        measured,
+        smoothing_samples,
+        band_standard_deviations,
+    )
+    estimated, estimated_lower, estimated_upper = smooth_signal_and_band(
+        estimated,
+        smoothing_samples,
+        band_standard_deviations,
+    )
 
     valid = (
         np.isfinite(time)
@@ -244,7 +326,7 @@ def acceleration_signals(data, measured_column, estimated_column):
 def style_axis(axis):
     axis.set_facecolor(PANEL_COLOR)
     axis.set_axisbelow(True)
-    axis.grid(True, color=GRID_COLOR, linewidth=3.0)#, alpha=0.80)
+    axis.grid(True, color=GRID_COLOR, linewidth=1.0)#, alpha=0.80)
     axis.tick_params(axis="both", which="both", length=0, labelsize=10)
     for spine in axis.spines.values():
         spine.set_visible(False)
@@ -262,6 +344,7 @@ def plot_acceleration(
     measured_color,
     estimated_color,
     y_label,
+    band_alpha,
 ):
     """Plot the acceleration target and its RLS estimate."""
     axis.fill_between(
@@ -269,7 +352,7 @@ def plot_acceleration(
         measured_lower,
         measured_upper,
         color=measured_color,
-        alpha=ACCELERATION_BAND_ALPHA,
+        alpha=band_alpha,
         linewidth=0,
     )
     axis.fill_between(
@@ -277,7 +360,7 @@ def plot_acceleration(
         estimated_lower,
         estimated_upper,
         color=estimated_color,
-        alpha=ACCELERATION_BAND_ALPHA,
+        alpha=band_alpha,
         linewidth=0,
     )
     axis.plot(
@@ -293,7 +376,7 @@ def plot_acceleration(
         time,
         estimated,
         color=estimated_color,
-        linewidth=2.2,
+        linewidth=1.5,
         label="RLS estimate",
     )
     axis.axhline(0.0, color=ZERO_LINE_COLOR, linewidth=0.9, alpha=0.75)
@@ -322,7 +405,19 @@ def plot_acceleration(
     axis.legend(loc="lower left", frameon=False, fontsize=8.5)
 
 
-def plot_maneuver_row(axes, data, pitch_reference_deg):
+def plot_maneuver_row(
+    axes,
+    data,
+    pitch_reference_deg,
+    acceleration_smoothing_samples,
+    acceleration_band_standard_deviations,
+    acceleration_band_alpha,
+    angular_median_filter_samples=1,
+    angular_max_abs=None,
+    linear_median_filter_samples=1,
+    linear_max_abs=None,
+    plot_accelerations=True,
+):
     """Plot pitch, angular acceleration, linear acceleration, and torque."""
     time = data[TIME_COLUMN].to_numpy(dtype=float)
     pitch = data[PITCH_COLUMN].to_numpy(dtype=float)
@@ -330,15 +425,15 @@ def plot_maneuver_row(axes, data, pitch_reference_deg):
     pitch = centered_time_mean(time, pitch, PITCH_SMOOTHING_SECONDS)
 
     pitch_reference = np.full_like(time, pitch_reference_deg)
-    axes[0].fill_between(
-        time,
-        pitch_reference - PITCH_TOLERANCE_DEG,
-        pitch_reference + PITCH_TOLERANCE_DEG,
-        color=REFERENCE_COLOR,
-        alpha=0.10,
-        linewidth=0,
-        label="Target tolerance",
-    )
+    # axes[0].fill_between(
+    #     time,
+    #     pitch_reference - PITCH_TOLERANCE_DEG,
+    #     pitch_reference + PITCH_TOLERANCE_DEG,
+    #     color=REFERENCE_COLOR,
+    #     alpha=0.10,
+    #     linewidth=0,
+    #     label="Target tolerance",
+    # )
     axes[0].plot(
         time,
         pitch_reference,
@@ -351,59 +446,74 @@ def plot_maneuver_row(axes, data, pitch_reference_deg):
     axes[0].set_ylabel("Pitch (deg)")
     axes[0].legend(loc="best", frameon=False, fontsize=8.5)
 
-    (
-        angular_time,
-        angular_measured,
-        angular_estimated,
-        angular_measured_lower,
-        angular_measured_upper,
-        angular_estimated_lower,
-        angular_estimated_upper,
-    ) = acceleration_signals(
-        data,
-        ANGULAR_ACCELERATION_MEASURED_COLUMN,
-        ANGULAR_ACCELERATION_ESTIMATED_COLUMN,
-    )
-    plot_acceleration(
-        axes[1],
-        angular_time,
-        angular_measured,
-        angular_estimated,
-        angular_measured_lower,
-        angular_measured_upper,
-        angular_estimated_lower,
-        angular_estimated_upper,
-        ANGULAR_MEASURED_COLOR,
-        ANGULAR_ESTIMATED_COLOR,
-        r"Angular acceleration (rad/s$^2$)",
-    )
+    if plot_accelerations:
+        torque_axis = axes[3]
+        (
+            angular_time,
+            angular_measured,
+            angular_estimated,
+            angular_measured_lower,
+            angular_measured_upper,
+            angular_estimated_lower,
+            angular_estimated_upper,
+        ) = acceleration_signals(
+            data,
+            ANGULAR_ACCELERATION_MEASURED_COLUMN,
+            ANGULAR_ACCELERATION_ESTIMATED_COLUMN,
+            acceleration_smoothing_samples,
+            acceleration_band_standard_deviations,
+            median_filter_samples=angular_median_filter_samples,
+            max_abs=angular_max_abs,
+        )
+        plot_acceleration(
+            axes[1],
+            angular_time,
+            angular_measured,
+            angular_estimated,
+            angular_measured_lower,
+            angular_measured_upper,
+            angular_estimated_lower,
+            angular_estimated_upper,
+            ANGULAR_MEASURED_COLOR,
+            ANGULAR_ESTIMATED_COLOR,
+            r"Angular acceleration (rad/s$^2$)",
+            acceleration_band_alpha,
+        )
 
-    (
-        linear_time,
-        linear_measured,
-        linear_estimated,
-        linear_measured_lower,
-        linear_measured_upper,
-        linear_estimated_lower,
-        linear_estimated_upper,
-    ) = acceleration_signals(
-        data,
-        LINEAR_ACCELERATION_MEASURED_COLUMN,
-        LINEAR_ACCELERATION_ESTIMATED_COLUMN,
-    )
-    plot_acceleration(
-        axes[2],
-        linear_time,
-        linear_measured,
-        linear_estimated,
-        linear_measured_lower,
-        linear_measured_upper,
-        linear_estimated_lower,
-        linear_estimated_upper,
-        LINEAR_MEASURED_COLOR,
-        LINEAR_ESTIMATED_COLOR,
-        r"Linear acceleration (m/s$^2$)",
-    )
+        (
+            linear_time,
+            linear_measured,
+            linear_estimated,
+            linear_measured_lower,
+            linear_measured_upper,
+            linear_estimated_lower,
+            linear_estimated_upper,
+        ) = acceleration_signals(
+            data,
+            LINEAR_ACCELERATION_MEASURED_COLUMN,
+            LINEAR_ACCELERATION_ESTIMATED_COLUMN,
+            acceleration_smoothing_samples,
+            acceleration_band_standard_deviations,
+            median_filter_samples=linear_median_filter_samples,
+            max_abs=linear_max_abs,
+        )
+
+        plot_acceleration(
+            axes[2],
+            linear_time,
+            linear_measured,
+            linear_estimated,
+            linear_measured_lower,
+            linear_measured_upper,
+            linear_estimated_lower,
+            linear_estimated_upper,
+            LINEAR_MEASURED_COLOR,
+            LINEAR_ESTIMATED_COLOR,
+            r"Linear acceleration (m/s$^2$)",
+            acceleration_band_alpha,
+        )
+    else:
+        torque_axis = axes[1]
 
     torque_mean, torque_lower, torque_upper = centered_time_mean_and_band(
         time,
@@ -411,7 +521,7 @@ def plot_maneuver_row(axes, data, pitch_reference_deg):
         TORQUE_SMOOTHING_SECONDS,
         TORQUE_BAND_STANDARD_DEVIATIONS,
     )
-    axes[3].fill_between(
+    torque_axis.fill_between(
         time,
         torque_lower,
         torque_upper,
@@ -420,21 +530,21 @@ def plot_maneuver_row(axes, data, pitch_reference_deg):
         linewidth=0,
         #label=r"Local variation ($\pm 1\sigma$)",
     )
-    axes[3].plot(
+    torque_axis.plot(
         time,
         torque_mean,
         color=TORQUE_COLOR,
         linewidth=2.2,
         label="Applied Torque",
     )
-    axes[3].axhline(
+    torque_axis.axhline(
         0.0,
         color=ZERO_LINE_COLOR,
         linewidth=0.9,
         alpha=0.75,
     )
-    axes[3].set_ylabel(r"Torque (N$\cdot$m)")
-    axes[3].legend(loc="best", frameon=False, fontsize=8.0)
+    torque_axis.set_ylabel(r"Torque (N$\cdot$m)")
+    torque_axis.legend(loc="best", frameon=False, fontsize=8.0)
 
     for axis in axes:
         style_axis(axis)
@@ -443,6 +553,10 @@ def plot_maneuver_row(axes, data, pitch_reference_deg):
 
 def create_figure(flip_data, wheelie_data, flip_episode, wheelie_episode):
     """Create the combined two-maneuver results figure."""
+    if PLOT_MODE not in {"all", "pitch_control"}:
+        raise ValueError('PLOT_MODE must be either "all" or "pitch_control".')
+    plot_accelerations = PLOT_MODE == "all"
+
     plt.rcParams.update(
         {
             "font.family": "sans-serif",
@@ -452,25 +566,51 @@ def create_figure(flip_data, wheelie_data, flip_episode, wheelie_episode):
         }
     )
 
-    figure, axes = plt.subplots(2, 4, figsize=(17, 8))
+    if plot_accelerations:
+        figure, axes = plt.subplots(2, 4, figsize=(17, 8))
+        titles = [
+            "Pitch Tracking",
+            "Angular Acceleration",
+            "Linear Acceleration",
+            "Control Input",
+        ]
+    else:
+        figure, axes = plt.subplots(2, 2, figsize=(10, 6))
+        titles = [
+            "Pitch Tracking",
+            "Control Input",
+        ]
     figure.patch.set_facecolor("#FAFAFA")
-
-    titles = [
-        "Pitch Tracking",
-        "Angular Acceleration",
-        "Linear Acceleration",
-        "Control Input",
-    ]
     for column, title in enumerate(titles):
         axes[0, column].set_title(title, pad=10, fontweight="medium")
 
-    plot_maneuver_row(axes[0], wheelie_data, WHEELIE_PITCH_REFERENCE_DEG)
-    plot_maneuver_row(axes[1], flip_data, FLIP_PITCH_REFERENCE_DEG)
+    plot_maneuver_row(
+        axes[0],
+        wheelie_data,
+        WHEELIE_PITCH_REFERENCE_DEG,
+        WHEELIE_ACCELERATION_SMOOTHING_SAMPLES,
+        WHEELIE_ACCELERATION_BAND_STANDARD_DEVIATIONS,
+        WHEELIE_ACCELERATION_BAND_ALPHA,
+        angular_median_filter_samples=WHEELIE_ANGULAR_ACCELERATION_MEDIAN_FILTER_SAMPLES,
+        angular_max_abs=WHEELIE_ANGULAR_ACCELERATION_MAX_ABS,
+        linear_median_filter_samples=WHEELIE_LINEAR_ACCELERATION_MEDIAN_FILTER_SAMPLES,
+        linear_max_abs=WHEELIE_LINEAR_ACCELERATION_MAX_ABS,
+        plot_accelerations=plot_accelerations,
+    )
+    plot_maneuver_row(
+        axes[1],
+        flip_data,
+        FLIP_PITCH_REFERENCE_DEG,
+        FLIP_ACCELERATION_SMOOTHING_SAMPLES,
+        FLIP_ACCELERATION_BAND_STANDARD_DEVIATIONS,
+        FLIP_ACCELERATION_BAND_ALPHA,
+        plot_accelerations=plot_accelerations,
+    )
 
     row_labels = [(axes[0, 0], "WHEELIE"), (axes[1, 0], "FLIP")]
     for axis, label in row_labels:
         axis.text(
-            -0.32,
+            -0.32 if plot_accelerations else -0.18,
             0.5,
             label,
             transform=axis.transAxes,
@@ -488,12 +628,10 @@ def create_figure(flip_data, wheelie_data, flip_episode, wheelie_episode):
     #     fontweight="bold",
     #     #y=0.982,
     # )
-    if ACCELERATION_SMOOTHING_SAMPLES > 1:
-        smoothing_note = (
-            f" A {ACCELERATION_SMOOTHING_SAMPLES}-update centered mean is shown."
-        )
-    else:
-        smoothing_note = " No display smoothing is applied."
+    smoothing_note = (
+        f" Wheelie smoothing: {WHEELIE_ACCELERATION_SMOOTHING_SAMPLES} updates; "
+        f"flip smoothing: {FLIP_ACCELERATION_SMOOTHING_SAMPLES} updates."
+    )
 
     # figure.text(
     #     0.5,
@@ -515,10 +653,10 @@ def create_figure(flip_data, wheelie_data, flip_episode, wheelie_episode):
         right=0.985,
         top=0.85,
         bottom=0.105,
-        wspace=0.42,
+        wspace=0.42 if plot_accelerations else 0.30,
         hspace=0.40,
     )
-    figure.savefig(OUTPUT_FILE, dpi=300, bbox_inches="tight", facecolor="white")
+    figure.savefig(OUTPUT_FILE, dpi=1000, bbox_inches="tight", facecolor="white")
     return figure
 
 

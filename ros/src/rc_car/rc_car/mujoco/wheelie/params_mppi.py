@@ -34,7 +34,7 @@ class WheelieParams:
 
 @dataclass
 class MPPIConfig:
-    dt: float = 0.02
+    dt: float = 0.03
     N: int = 15
 
     # Stage/Running cost weights 

@@ -2,17 +2,35 @@ import numpy as np
 import torch
 
 
+# def nominal_rls_parameters(p) -> np.ndarray:
+#     """Return the RLS coefficients corresponding to the nominal plant model."""
+#     return np.array(
+#         [
+#             1.0 / (p.m * p.r),
+#             -p.c_v,
+#             0.0,
+#             0.0,
+#             0.0,
+#             p.m * p.g * p.l / p.I_eff,
+#             -1.0 / p.I_eff,
+#             0.0,
+#             0.0,
+#             0.0,
+#         ],
+#         dtype=float,
+#     )
+
 def nominal_rls_parameters(p) -> np.ndarray:
     """Return the RLS coefficients corresponding to the nominal plant model."""
     return np.array(
         [
-            1.0 / (p.m * p.r),
-            -p.c_v,
             0.0,
             0.0,
             0.0,
-            p.m * p.g * p.l / p.I_eff,
-            -1.0 / p.I_eff,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
             0.0,
             0.0,
             0.0,
@@ -45,11 +63,23 @@ def rls_update(
     )
 
     phi_v = np.array(
-        [tau, v_prev, abs(v_prev) * v_prev, tau * np.cos(theta_prev), 1.0],
+        [
+            tau, 
+            v_prev, 
+            abs(v_prev) * v_prev, 
+            tau * np.cos(theta_prev), 
+            1.0
+        ],
         dtype=float,
     )
     phi_w = np.array(
-        [np.cos(theta_prev), tau, omega_prev, v_prev, 1.0],
+        [
+            np.cos(theta_prev), 
+            tau, 
+            omega_prev, 
+            v_prev, 
+            1.0
+        ],
         dtype=float,
     )
 

@@ -1,0 +1,47 @@
+{
+  "session": 883387603,
+  "csv": "/ros_ws/src/rc_car/rc_car/real_car/esp32/transmitter/main/latency_logs/drive_latency_20260916_234437_482661.csv",
+  "submitted": 245,
+  "outcomes": {
+    "ack": 219,
+    "ack_timeout": 26
+  },
+  "pending": 0,
+  "rejected": 0,
+  "late_or_duplicate_acks": 0,
+  "dropped_log_rows": 0,
+  "source_clock_shared": false,
+  "stamped_input": false,
+  "ack_timeout_seconds": 0.5,
+  "statistics_window_limit": 10000,
+  "no_ack_by_deadline_fraction_of_completed": 0.10612244897959183,
+  "statistics": {
+    "callback_to_ack_ms": {
+      "n": 219,
+      "min_ms": 3.122508,
+      "mean_ms": 16.53918414611872,
+      "median_ms": 15.152346,
+      "std_ms": 9.143853815235472,
+      "p95_ms": 33.654234499999994,
+      "p99_ms": 41.41646115999998,
+      "max_ms": 48.395592
+    },
+    "source_to_ack_ms": {},
+    "espnow_rtt_ms": {
+      "n": 219,
+      "min_ms": 2.567,
+      "mean_ms": 10.523872146118721,
+      "median_ms": 8.29,
+      "std_ms": 7.096701032543024,
+      "p95_ms": 25.262499999999992,
+      "p99_ms": 32.104260000000004,
+      "max_ms": 37.383
+    }
+  },
+  "notes": [
+    "Statistics cover at most the latest 10000 successful acknowledged commands, including matched late ACKs.",
+    "Timeouts are not radio packet-loss measurements; commands/ACKs can be superseded, dropped or delayed.",
+    "RTT includes ACK return path; receiver software update is not physical PWM or vehicle motion.",
+    "radio_half_rtt_est_ms assumes symmetric radio directions; no clock synchronization is performed."
+  ]
+}

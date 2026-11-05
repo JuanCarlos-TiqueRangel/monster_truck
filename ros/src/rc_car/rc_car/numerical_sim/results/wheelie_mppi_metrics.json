@@ -1,0 +1,26 @@
+{
+  "reference_pitch_deg": 30.579226872489016,
+  "final_pitch_deg": 30.706466604044532,
+  "peak_pitch_deg": 31.50504974828582,
+  "pitch_rmse_last_second_deg": 0.5451257549097618,
+  "final_speed_m_s": -0.03100109023907958,
+  "max_abs_speed_m_s": 0.634403587700673,
+  "max_abs_pitch_rate_rad_s": 2.478791171058743,
+  "pitch_rate_rms_last_second": 0.08732924842076267,
+  "max_abs_torque_nm": 0.43279150128364563,
+  "min_rear_normal_force_n": 9.572956083970578,
+  "median_solve_ms": 14.53887099341955,
+  "p95_solve_ms": 14.999679403263144,
+  "warmup_seconds": 9.833252580006956,
+  "median_ess": 23.299942016601562,
+  "minimum_feasible_fraction": 0.583984375,
+  "rls_updates": 498,
+  "rls_parameters": [
+    0.9940581844937976,
+    8.938048098867215,
+    0.008962178872979744
+  ],
+  "seed": 0,
+  "adaptation_enabled": true,
+  "plant_mismatch": false
+}

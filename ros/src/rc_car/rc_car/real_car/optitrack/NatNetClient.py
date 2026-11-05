@@ -341,10 +341,6 @@ class NatNetClient:
 
         rigid_body = MoCapData.RigidBody(new_id, pos, rot)
 
-        # Send information to any listener.
-        if self.rigid_body_listener is not None:
-            self.rigid_body_listener( new_id, pos, rot )
-
         # RB Marker Data ( Before version 3.0.  After Version 3.0 Marker data is in description )
         if( major < 3  and major != 0) :
             # Marker count (4 bytes)
@@ -402,6 +398,13 @@ class NatNetClient:
             else:
                 rigid_body.tracking_valid = False
 
+        # Dispatch only after parsing tracking quality. Older streams do not
+        # contain a validity flag; preserve their existing callback behavior.
+        has_tracking_flag = ((major == 2 and minor >= 6) or major > 2)
+        if self.rigid_body_listener is not None and (
+                not has_tracking_flag or rigid_body.tracking_valid):
+            # Pre-3.0 marker parsing reuses the local ID and position variables.
+            self.rigid_body_listener(rigid_body.id_num, rigid_body.pos, rigid_body.rot)
 
         return offset, rigid_body
 

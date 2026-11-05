@@ -1,0 +1,9 @@
+{
+  "test": "controller_on_its_own_model_only",
+  "physical_validation": false,
+  "steps": 150,
+  "failed_solves": 0,
+  "last_second_pitch_rmse_deg": 0.7855943701119424,
+  "final_pitch_deg": -54.61395949670846,
+  "final_v": 2.032692731937081
+}

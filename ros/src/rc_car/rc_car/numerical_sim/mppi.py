@@ -11,18 +11,18 @@ except ImportError:
 
 @dataclass
 class MPPIConfig:
-    dt: float = 0.05
-    N: int = 10
+    dt: float = 0.04
+    N: int = 20
     num_samples: int = 4096
-    noise_sigma: float = 2.5
-    temperature: float = 20.0
+    noise_sigma: float = 0.1
+    temperature: float = 6.0
 
     q_x: float = 0.0
     q_v: float = 0.001
-    q_theta: float = 50.0
-    q_omega: float = 0.3
-    r_tau: float = 0.0003
-    r_dtau: float = 0.025
+    q_theta: float = 100.0
+    q_omega: float = 0.1
+    r_tau: float = 0.01
+    r_dtau: float = 0.1
     q_terminal_x: float = 0.0
     q_terminal_theta: float = 0.4
     q_terminal_omega: float = 0.08
@@ -59,21 +59,22 @@ def mppi_update_torch(
         pitch_below_min = torch.relu(p.theta_min - states[:, 2])
         pitch_above_max = torch.relu(states[:, 2] - p.theta_max)
         costs += (
-            cfg.q_x * e[:, 0] ** 2
-            + cfg.q_v * e[:, 1] ** 2
+            #cfg.q_x * e[:, 0] ** 2
+            #+ cfg.q_v * e[:, 1] ** 2
             + cfg.q_theta * pitch_error**2
-            + cfg.q_theta * (pitch_below_min**2 + pitch_above_max**2)
+            #+ cfg.q_theta * (pitch_below_min**2 + pitch_above_max**2)
             + cfg.q_omega * e[:, 3] ** 2
             + cfg.r_tau * tau_k**2
             + cfg.r_dtau * du**2
         )
+
         states = rk4_step_torch(states, tau_k, cfg.dt, a_rls)
         tau_previous = tau_k
 
     e_terminal = states - ref[None, :]
     costs += (
-        cfg.q_terminal_x * e_terminal[:, 0] ** 2
-        + cfg.q_v * e_terminal[:, 1] ** 2
+        #cfg.q_terminal_x * e_terminal[:, 0] ** 2
+        #+ cfg.q_v * e_terminal[:, 1] ** 2
         + cfg.q_terminal_theta * e_terminal[:, 2] ** 2
         + cfg.q_terminal_omega * e_terminal[:, 3] ** 2
     )

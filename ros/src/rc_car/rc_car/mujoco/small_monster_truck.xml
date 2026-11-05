@@ -1,0 +1,204 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="valuetalks_1_16_wheelie_4wd">
+  <!-- Photo-inspired 1:16 car. Dimensions not supplied were estimated.
+       Coordinate convention: +X front, +Y left, +Z up.
+       Nominal axle centers +/-0.095 m; wheel radius 0.0375 m.
+       Mass distribution totals exactly 1.300 kg (including 0.352 kg battery).
+       A SINGLE 4WD drive actuator is applied via a fixed tendon to all four wheels.
+       The independent steering servo is a separate actuator, as on the physical car.
+       Chassis pan ground clearance at rest is approximately 0.025 m (25 mm). -->
+  <compiler angle="degree" autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast"/>
+  <size njmax="600" nconmax="150"/>
+  <statistic center="0 0 0.1" extent="0.42"/>
+  <visual>
+    <headlight ambient="0.50 0.50 0.50" diffuse="0.65 0.65 0.65" specular="0.2 0.2 0.2"/>
+    <rgba haze="0.9 0.9 0.9 1"/>
+  </visual>
+  <asset>
+    <texture name="checker" type="2d" builtin="checker" rgb1="0.22 0.23 0.25" rgb2="0.3 0.31 0.33" width="512" height="512"/>
+    <texture name="battery_side_texture" type="2d" file="battery_side_label.png"/><material name="ground_mat" texture="checker" texrepeat="6 6" reflectance="0.05"/>
+    <material name="tire_mat" rgba="0.07 0.07 0.075 1"/>
+    <material name="rim_mat" rgba="0.12 0.13 0.15 1" specular="0.35" shininess="0.5"/>
+    <material name="frame_mat" rgba="0.075 0.09 0.11 1"/>
+    <material name="cage_mat" rgba="0.02 0.43 0.92 1"/>
+    <material name="metal_mat" rgba="0.65 0.68 0.72 1"/>
+    <material name="battery_mat" rgba="0.055 0.060 0.075 1"/>
+    <material name="spring_mat" rgba="0.77 0.12 0.11 1"/>
+  <material name="battery_side_mat" texture="battery_side_texture" texrepeat="1 1" texuniform="false" specular="0.12" shininess="0.2"/></asset>
+
+  <worldbody>
+    <light name="sun" directional="true" pos="0 -1 3" dir="0 0 -1" diffuse="0.9 0.9 0.9"/>
+    <geom name="ground" type="plane" size="8 8 0.1" material="ground_mat" friction="1.4 0.01 0.002"/>
+    <camera name="side" pos="0 -0.65 0.25" euler="74 0 0"/>
+
+    <!-- CHASSIS BODY: 0.401 kg -->
+    <body name="chassis" pos="0 0 0.050">
+      <freejoint name="root"/>
+      <inertial pos="0 0 -0.004" mass="0.401" diaginertia="0.00075 0.00154 0.00196"/>
+      <geom name="chassis_pan" type="box" pos="0 0 -0.004" size="0.104 0.060 0.013" material="frame_mat" friction="0.9 0.01 0.001"/>
+      <geom name="front_bumper" type="box" pos="0.113 0 -0.003" size="0.009 0.075 0.009" material="frame_mat"/>
+      <geom name="rear_bumper" type="box" pos="-0.114 0 -0.003" size="0.010 0.074 0.009" material="frame_mat"/>
+      <site name="imu" pos="0 0 0.025" size="0.004" rgba="1 1 0 1"/>
+
+      <!-- BATTERY: 0.352 kg; 144 x 47 x 43 mm. Long axis Y after 90-degree yaw; level mount. Photo-based labels on the battery longitudinal side faces, transformed with the pack. -->
+      <body name="battery" pos="-0.043 0 0.132" euler="0 0 90">
+        <inertial pos="0 0 0" mass="0.352" diaginertia="0.0001190347 0.0006624933 0.0006730533"/>
+        <!-- Two thin blue decals on the upward-facing 144 x 47 mm face. -->
+        <!-- Retaining strap wraps across the pack's 47 mm width. -->
+        <!-- ONE continuous 144 x 47 x 43 mm battery. Battery local +X is the long direction, world +Y after yaw=90; labels rotate with pack. --><geom name="battery_pack" type="box" size="0.072 0.0235 0.0215" material="battery_mat" friction="0.9 0.01 0.001"/><!-- Photographically rectified 5200 mAh / Zeee wrap on BOTH long vertical faces (XZ plane). --><geom name="battery_side_label_left" type="box" pos="0 0.02362 0" size="0.0714 0.00009 0.02085" material="battery_side_mat" contype="0" conaffinity="0"/><geom name="battery_side_label_right" type="box" pos="0 -0.02362 0" size="0.0714 0.00009 0.02085" material="battery_side_mat" contype="0" conaffinity="0"/><!-- Narrow fabric straps over the TOP (side wrap is already in the photographed label). --><geom name="battery_strap_top_1" type="box" pos="-0.008 0 0.02185" size="0.0014 0.02355 0.00042" rgba="0.025 0.025 0.03 1" contype="0" conaffinity="0"/><geom name="battery_strap_bottom_1" type="box" pos="-0.008 0 -0.02185" size="0.0014 0.02355 0.00042" rgba="0.025 0.025 0.03 1" contype="0" conaffinity="0"/><geom name="battery_strap_top_2" type="box" pos="0.034 0 0.02185" size="0.0014 0.02355 0.00042" rgba="0.025 0.025 0.03 1" contype="0" conaffinity="0"/><geom name="battery_strap_bottom_2" type="box" pos="0.034 0 -0.02185" size="0.0014 0.02355 0.00042" rgba="0.025 0.025 0.03 1" contype="0" conaffinity="0"/><!-- Small white barcode sticker on the rear end of the black pack. --><geom name="battery_barcode" type="box" pos="-0.07225 0 -0.004" size="0.00011 0.012 0.0067" rgba="0.87 0.88 0.86 1" contype="0" conaffinity="0"/><geom name="battery_barcode_line_0" type="box" pos="-0.07241 -0.008000 -0.004" size="0.00012 0.000360 0.0042" rgba="0.1 0.1 0.11 1" contype="0" conaffinity="0"/><geom name="battery_barcode_line_1" type="box" pos="-0.07241 -0.006667 -0.004" size="0.00012 0.000190 0.0042" rgba="0.1 0.1 0.11 1" contype="0" conaffinity="0"/><geom name="battery_barcode_line_3" type="box" pos="-0.07241 -0.004000 -0.004" size="0.00012 0.000190 0.0042" rgba="0.1 0.1 0.11 1" contype="0" conaffinity="0"/><geom name="battery_barcode_line_4" type="box" pos="-0.07241 -0.002667 -0.004" size="0.00012 0.000360 0.0042" rgba="0.1 0.1 0.11 1" contype="0" conaffinity="0"/><geom name="battery_barcode_line_5" type="box" pos="-0.07241 -0.001333 -0.004" size="0.00012 0.000190 0.0042" rgba="0.1 0.1 0.11 1" contype="0" conaffinity="0"/><geom name="battery_barcode_line_7" type="box" pos="-0.07241 0.001333 -0.004" size="0.00012 0.000190 0.0042" rgba="0.1 0.1 0.11 1" contype="0" conaffinity="0"/><geom name="battery_barcode_line_8" type="box" pos="-0.07241 0.002667 -0.004" size="0.00012 0.000360 0.0042" rgba="0.1 0.1 0.11 1" contype="0" conaffinity="0"/><geom name="battery_barcode_line_9" type="box" pos="-0.07241 0.004000 -0.004" size="0.00012 0.000190 0.0042" rgba="0.1 0.1 0.11 1" contype="0" conaffinity="0"/><geom name="battery_barcode_line_11" type="box" pos="-0.07241 0.006667 -0.004" size="0.00012 0.000190 0.0042" rgba="0.1 0.1 0.11 1" contype="0" conaffinity="0"/><geom name="battery_barcode_line_12" type="box" pos="-0.07241 0.008000 -0.004" size="0.00012 0.000360 0.0042" rgba="0.1 0.1 0.11 1" contype="0" conaffinity="0"/></body>
+
+      <!-- SINGLE BRUSHLESS DRIVE MOTOR + TRANSFER CASE: 0.110 kg -->
+      <body name="drive_motor_visual" pos="-0.020 0 0.015">
+        <inertial pos="0 0 0" mass="0.110" diaginertia="0.000042 0.000057 0.000052"/>
+        <geom name="motor_can" type="cylinder" size="0.013 0.024" euler="0 90 0" material="metal_mat" contype="0" conaffinity="0"/>
+        <geom name="transfer_case" type="box" pos="-0.023 0 0" size="0.017 0.023 0.012" material="frame_mat" contype="0" conaffinity="0"/>
+      </body>
+
+      <!-- ELECTRONICS / RECEIVER: 0.045 kg -->
+      <body name="electronics" pos="0.043 0 0.022">
+        <inertial pos="0 0 0" mass="0.045" diaginertia="0.000015 0.000030 0.000035"/>
+        <geom name="electronics_box" type="box" size="0.036 0.029 0.014" material="frame_mat" contype="0" conaffinity="0"/>
+      </body>
+
+      <!-- 3D-PRINTED BLUE ROLL CAGE: 0.100 kg -->
+      <body name="blue_cage" pos="0 0 0">
+        <inertial pos="-0.008 0 0.057" mass="0.100" diaginertia="0.00017 0.00040 0.00051"/>
+        <!-- Its external bars can touch the ground when the car flips. -->
+        <geom name="cage_left_arch_0" type="capsule" fromto="0.1060 0.0480 0.0060 0.0770 0.0480 0.0690" size="0.0047" material="cage_mat"/>
+        <geom name="cage_left_arch_1" type="capsule" fromto="0.0770 0.0480 0.0690 0.0380 0.0480 0.1030" size="0.0047" material="cage_mat"/>
+        <geom name="cage_left_arch_2" type="capsule" fromto="0.0380 0.0480 0.1030 -0.0320 0.0480 0.1090" size="0.0047" material="cage_mat"/>
+        <geom name="cage_left_arch_3" type="capsule" fromto="-0.0320 0.0480 0.1090 -0.0850 0.0480 0.0810" size="0.0047" material="cage_mat"/>
+        <geom name="cage_left_arch_4" type="capsule" fromto="-0.0850 0.0480 0.0810 -0.1040 0.0480 0.0200" size="0.0047" material="cage_mat"/>
+        <geom name="cage_left_brace_0" type="capsule" fromto="0.0750 0.0480 0.0700 0.0750 0.0480 0.0170" size="0.0035" material="cage_mat" contype="0" conaffinity="0"/>
+        <geom name="cage_left_brace_1" type="capsule" fromto="0.0350 0.0480 0.1000 0.0250 0.0480 0.0150" size="0.0035" material="cage_mat" contype="0" conaffinity="0"/>
+        <geom name="cage_left_brace_2" type="capsule" fromto="-0.0330 0.0480 0.1070 -0.0350 0.0480 0.0150" size="0.0035" material="cage_mat" contype="0" conaffinity="0"/>
+        <geom name="cage_left_brace_3" type="capsule" fromto="0.0800 0.0480 0.0500 -0.0150 0.0480 0.0470" size="0.0035" material="cage_mat" contype="0" conaffinity="0"/>
+        <geom name="cage_left_brace_4" type="capsule" fromto="-0.0350 0.0480 0.0480 -0.0900 0.0480 0.0750" size="0.0035" material="cage_mat" contype="0" conaffinity="0"/>
+        <geom name="cage_right_arch_0" type="capsule" fromto="0.1060 -0.0480 0.0060 0.0770 -0.0480 0.0690" size="0.0047" material="cage_mat"/>
+        <geom name="cage_right_arch_1" type="capsule" fromto="0.0770 -0.0480 0.0690 0.0380 -0.0480 0.1030" size="0.0047" material="cage_mat"/>
+        <geom name="cage_right_arch_2" type="capsule" fromto="0.0380 -0.0480 0.1030 -0.0320 -0.0480 0.1090" size="0.0047" material="cage_mat"/>
+        <geom name="cage_right_arch_3" type="capsule" fromto="-0.0320 -0.0480 0.1090 -0.0850 -0.0480 0.0810" size="0.0047" material="cage_mat"/>
+        <geom name="cage_right_arch_4" type="capsule" fromto="-0.0850 -0.0480 0.0810 -0.1040 -0.0480 0.0200" size="0.0047" material="cage_mat"/>
+        <geom name="cage_right_brace_0" type="capsule" fromto="0.0750 -0.0480 0.0700 0.0750 -0.0480 0.0170" size="0.0035" material="cage_mat" contype="0" conaffinity="0"/>
+        <geom name="cage_right_brace_1" type="capsule" fromto="0.0350 -0.0480 0.1000 0.0250 -0.0480 0.0150" size="0.0035" material="cage_mat" contype="0" conaffinity="0"/>
+        <geom name="cage_right_brace_2" type="capsule" fromto="-0.0330 -0.0480 0.1070 -0.0350 -0.0480 0.0150" size="0.0035" material="cage_mat" contype="0" conaffinity="0"/>
+        <geom name="cage_right_brace_3" type="capsule" fromto="0.0800 -0.0480 0.0500 -0.0150 -0.0480 0.0470" size="0.0035" material="cage_mat" contype="0" conaffinity="0"/>
+        <geom name="cage_right_brace_4" type="capsule" fromto="-0.0350 -0.0480 0.0480 -0.0900 -0.0480 0.0750" size="0.0035" material="cage_mat" contype="0" conaffinity="0"/>
+        <geom name="cage_cross_0" type="capsule" fromto="0.105 -0.048 0.013 0.105 0.048 0.013" size="0.004" material="cage_mat" contype="0" conaffinity="0"/>
+        <geom name="cage_cross_1" type="capsule" fromto="0.037 -0.048 0.102 0.037 0.048 0.102" size="0.004" material="cage_mat" contype="0" conaffinity="0"/>
+        <geom name="cage_cross_2" type="capsule" fromto="-0.034 -0.048 0.108 -0.034 0.048 0.108" size="0.004" material="cage_mat" contype="0" conaffinity="0"/>
+        <geom name="cage_cross_3" type="capsule" fromto="-0.099 -0.048 0.028 -0.099 0.048 0.028" size="0.004" material="cage_mat" contype="0" conaffinity="0"/>
+      </body>
+
+      <!-- Shock length ~= 0.07 m (physical body); travel ~= 0.03 m (joint range).
+           These geoms are visual approximations; spring/damper physics is in slide joints. -->
+      <geom name="shock_fl_body" type="capsule" fromto="0.095 0.070 0.051 0.095 0.104 -0.002" size="0.0062" material="spring_mat" contype="0" conaffinity="0"/>
+      <geom name="shock_fl_rod" type="capsule" fromto="0.095 0.104 -0.002 0.095 0.104 -0.010" size="0.0035" material="metal_mat" contype="0" conaffinity="0"/>
+      <geom name="shock_fr_body" type="capsule" fromto="0.095 -0.070 0.051 0.095 -0.104 -0.002" size="0.0062" material="spring_mat" contype="0" conaffinity="0"/>
+      <geom name="shock_fr_rod" type="capsule" fromto="0.095 -0.104 -0.002 0.095 -0.104 -0.010" size="0.0035" material="metal_mat" contype="0" conaffinity="0"/>
+      <geom name="shock_rl_body" type="capsule" fromto="-0.095 0.070 0.051 -0.095 0.104 -0.002" size="0.0062" material="spring_mat" contype="0" conaffinity="0"/>
+      <geom name="shock_rl_rod" type="capsule" fromto="-0.095 0.104 -0.002 -0.095 0.104 -0.010" size="0.0035" material="metal_mat" contype="0" conaffinity="0"/>
+      <geom name="shock_rr_body" type="capsule" fromto="-0.095 -0.070 0.051 -0.095 -0.104 -0.002" size="0.0062" material="spring_mat" contype="0" conaffinity="0"/>
+      <geom name="shock_rr_rod" type="capsule" fromto="-0.095 -0.104 -0.002 -0.095 -0.104 -0.010" size="0.0035" material="metal_mat" contype="0" conaffinity="0"/>
+
+      <!-- FL suspension, 70 mm strut and 30 mm max spring stroke -->
+      <body name="fl_suspension" pos="0.095 0.106 -0.010">
+        <joint name="susp_fl" type="slide" axis="0 0 1" limited="true" range="-0.010 0.020" stiffness="450" damping="6.0" springref="0"/>
+        <inertial pos="0 0 0" mass="0.005" diaginertia="0.0000013 0.0000013 0.0000013"/>
+        <geom name="fl_carrier" type="sphere" size="0.010" material="metal_mat" contype="0" conaffinity="0"/>
+        <body name="fl_knuckle">
+          <joint name="steer_fl" type="hinge" axis="0 0 1" limited="true" range="-30 30" damping="0.12" armature="0.00003"/>
+          <inertial pos="0 0 0" mass="0.003" diaginertia="0.0000010 0.0000010 0.0000010"/>
+          <geom name="fl_knuckle_visual" type="box" size="0.007 0.013 0.012" material="metal_mat" contype="0" conaffinity="0"/>
+        <body name="fl_wheel">
+          <joint name="spin_fl" type="hinge" axis="0 1 0" damping="0.0007" armature="0.000006"/>
+          <inertial pos="0 0 0" mass="0.065" diaginertia="0.000032 0.000046 0.000032"/>
+          <geom name="fl_tire" type="cylinder" size="0.0375 0.022" quat="0.70710678 0.70710678 0 0" material="tire_mat" friction="1.5 0.015 0.0015" condim="4"/>
+          <geom name="fl_rim" type="cylinder" size="0.019 0.0225" quat="0.70710678 0.70710678 0 0" material="rim_mat" contype="0" conaffinity="0"/>
+          <geom name="fl_hub" type="cylinder" size="0.006 0.0245" quat="0.70710678 0.70710678 0 0" material="metal_mat" contype="0" conaffinity="0"/>
+        </body>
+        </body>
+      </body>
+
+      <!-- FR suspension, 70 mm strut and 30 mm max spring stroke -->
+      <body name="fr_suspension" pos="0.095 -0.106 -0.010">
+        <joint name="susp_fr" type="slide" axis="0 0 1" limited="true" range="-0.010 0.020" stiffness="450" damping="6.0" springref="0"/>
+        <inertial pos="0 0 0" mass="0.005" diaginertia="0.0000013 0.0000013 0.0000013"/>
+        <geom name="fr_carrier" type="sphere" size="0.010" material="metal_mat" contype="0" conaffinity="0"/>
+        <body name="fr_knuckle">
+          <joint name="steer_fr" type="hinge" axis="0 0 1" limited="true" range="-30 30" damping="0.12" armature="0.00003"/>
+          <inertial pos="0 0 0" mass="0.003" diaginertia="0.0000010 0.0000010 0.0000010"/>
+          <geom name="fr_knuckle_visual" type="box" size="0.007 0.013 0.012" material="metal_mat" contype="0" conaffinity="0"/>
+        <body name="fr_wheel">
+          <joint name="spin_fr" type="hinge" axis="0 1 0" damping="0.0007" armature="0.000006"/>
+          <inertial pos="0 0 0" mass="0.065" diaginertia="0.000032 0.000046 0.000032"/>
+          <geom name="fr_tire" type="cylinder" size="0.0375 0.022" quat="0.70710678 0.70710678 0 0" material="tire_mat" friction="1.5 0.015 0.0015" condim="4"/>
+          <geom name="fr_rim" type="cylinder" size="0.019 0.0225" quat="0.70710678 0.70710678 0 0" material="rim_mat" contype="0" conaffinity="0"/>
+          <geom name="fr_hub" type="cylinder" size="0.006 0.0245" quat="0.70710678 0.70710678 0 0" material="metal_mat" contype="0" conaffinity="0"/>
+        </body>
+        </body>
+      </body>
+
+      <!-- RL suspension, 70 mm strut and 30 mm max spring stroke -->
+      <body name="rl_suspension" pos="-0.095 0.106 -0.010">
+        <joint name="susp_rl" type="slide" axis="0 0 1" limited="true" range="-0.010 0.020" stiffness="450" damping="6.0" springref="0"/>
+        <inertial pos="0 0 0" mass="0.008" diaginertia="0.0000013 0.0000013 0.0000013"/>
+        <geom name="rl_carrier" type="sphere" size="0.010" material="metal_mat" contype="0" conaffinity="0"/>
+        <body name="rl_wheel">
+          <joint name="spin_rl" type="hinge" axis="0 1 0" damping="0.0007" armature="0.000006"/>
+          <inertial pos="0 0 0" mass="0.065" diaginertia="0.000032 0.000046 0.000032"/>
+          <geom name="rl_tire" type="cylinder" size="0.0375 0.022" quat="0.70710678 0.70710678 0 0" material="tire_mat" friction="1.5 0.015 0.0015" condim="4"/>
+          <geom name="rl_rim" type="cylinder" size="0.019 0.0225" quat="0.70710678 0.70710678 0 0" material="rim_mat" contype="0" conaffinity="0"/>
+          <geom name="rl_hub" type="cylinder" size="0.006 0.0245" quat="0.70710678 0.70710678 0 0" material="metal_mat" contype="0" conaffinity="0"/>
+        </body>
+      </body>
+
+      <!-- RR suspension, 70 mm strut and 30 mm max spring stroke -->
+      <body name="rr_suspension" pos="-0.095 -0.106 -0.010">
+        <joint name="susp_rr" type="slide" axis="0 0 1" limited="true" range="-0.010 0.020" stiffness="450" damping="6.0" springref="0"/>
+        <inertial pos="0 0 0" mass="0.008" diaginertia="0.0000013 0.0000013 0.0000013"/>
+        <geom name="rr_carrier" type="sphere" size="0.010" material="metal_mat" contype="0" conaffinity="0"/>
+        <body name="rr_wheel">
+          <joint name="spin_rr" type="hinge" axis="0 1 0" damping="0.0007" armature="0.000006"/>
+          <inertial pos="0 0 0" mass="0.065" diaginertia="0.000032 0.000046 0.000032"/>
+          <geom name="rr_tire" type="cylinder" size="0.0375 0.022" quat="0.70710678 0.70710678 0 0" material="tire_mat" friction="1.5 0.015 0.0015" condim="4"/>
+          <geom name="rr_rim" type="cylinder" size="0.019 0.0225" quat="0.70710678 0.70710678 0 0" material="rim_mat" contype="0" conaffinity="0"/>
+          <geom name="rr_hub" type="cylinder" size="0.006 0.0245" quat="0.70710678 0.70710678 0 0" material="metal_mat" contype="0" conaffinity="0"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- Hold both front steering knuckles at the same angle; one servo. -->
+  <equality>
+    <joint name="steering_link" joint1="steer_fl" joint2="steer_fr" polycoef="0 1 0 0 0"/>
+  </equality>
+
+  <!-- One electric motor transmits drive torque to four wheel shafts.
+       Equal fixed-tendon coefficients distribute *total* torque four ways.
+       This is a simplified torque-split transmission, not a detailed differential.
+       With gear=0.50 and ctrl=+1, each wheel receives +0.125 N*m. -->
+  <tendon>
+    <fixed name="four_wheel_drivetrain">
+      <joint joint="spin_fl" coef="0.25"/>
+      <joint joint="spin_fr" coef="0.25"/>
+      <joint joint="spin_rl" coef="0.25"/>
+      <joint joint="spin_rr" coef="0.25"/>
+    </fixed>
+  </tendon>
+
+  <actuator>
+    <motor name="drive" tendon="four_wheel_drivetrain" gear="0.50" ctrllimited="true" ctrlrange="-1 1"/>
+    <position name="steering_servo" joint="steer_fl" kp="4" ctrlrange="-0.45 0.45" ctrllimited="true"/>
+  </actuator>
+
+  <sensor>
+    <accelerometer name="imu_acceleration" site="imu"/>
+    <gyro name="imu_angular_velocity" site="imu"/>
+    <jointpos name="front_left_suspension" joint="susp_fl"/>
+    <jointpos name="front_right_suspension" joint="susp_fr"/>
+    <jointpos name="rear_left_suspension" joint="susp_rl"/>
+    <jointpos name="rear_right_suspension" joint="susp_rr"/>
+  </sensor>
+</mujoco>

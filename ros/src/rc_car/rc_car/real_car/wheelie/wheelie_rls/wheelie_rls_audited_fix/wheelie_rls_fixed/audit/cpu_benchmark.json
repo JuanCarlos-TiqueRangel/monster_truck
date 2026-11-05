@@ -1,0 +1,14 @@
+{
+  "device": "cpu",
+  "torch_version": "2.10.0+cpu",
+  "compiled": false,
+  "K": 5000,
+  "N": 20,
+  "dt_ms": 40.0,
+  "runs": 30,
+  "median_ms": 18.09020200005307,
+  "p95_ms": 18.77713955005902,
+  "max_ms": 18.953903999999966,
+  "successful_solves": 30,
+  "hardware_control_test": false
+}

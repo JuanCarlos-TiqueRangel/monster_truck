@@ -59,7 +59,7 @@ SHOW_PLOTS = True
 OUTPUT_NAME = "sac_vs_mbrl_comparison.pdf"
 
 SAC_LABEL = "SAC"
-MBRL_LABEL = "OUR"
+MBRL_LABEL = "Proposed"
 SAC_COLOR = "#0072B2"
 MBRL_COLOR = "#D55E00"
 SAC_LINESTYLE = "-"
@@ -243,11 +243,11 @@ def format_axes(axis, title, y_label):
     axis.set_xlabel("Episode")
     axis.set_ylabel(y_label)
     axis.set_axisbelow(True)
-    axis.set_facecolor("#F0EFEF")
+    axis.set_facecolor("#FBFAFA") #F0EFEF
     axis.grid(
         True,
-        color="#FAFAFA",
-        linewidth=3.0,
+        color="#E9E9E9",
+        linewidth=1.0,
         #alpha=0.10,
     )
     axis.tick_params(axis="both", which="both", length=0, labelsize=12)

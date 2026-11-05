@@ -25,12 +25,17 @@ def simulate_closed_loop() -> None:
 
     steps = int(p.sim_time / p.sim_dt)
     control_period_steps = max(1, int(cfg.dt / p.sim_dt))
-    a_nom = nominal_rls_parameters(p)
+    #a_nom = nominal_rls_parameters(p)
+
+    with np.load("rls_weights.npz") as data:
+        a_nom = data["learned_parameters"]
+    #print("[DEBUG] NOMINAL RLS PARAMETERS: ", type(a_nom_e))
+
     a_rls = a_nom.copy()
-    P_rls = 3.0 * np.eye(10)
+    P_rls = 3.0 * np.eye(a_rls.size)
     plant_has_mismatch = False
 
-    history = np.zeros((steps, 25), dtype=float)
+    history = np.zeros((steps, 13 + a_rls.size + 2), dtype=float)
     last_info = {"cost_min": np.nan, "effective_sample_size": np.nan}
 
     for k in range(steps):
@@ -81,6 +86,8 @@ def simulate_closed_loop() -> None:
             ]
         )
         state = state_next
+
+    np.savez("rls_weights", learned_parameters=a_rls)
 
     print_results(history, a_rls, a_nom)
     plot_results(history, a_nom)

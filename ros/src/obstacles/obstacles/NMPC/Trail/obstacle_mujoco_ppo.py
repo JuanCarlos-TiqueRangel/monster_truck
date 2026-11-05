@@ -31,11 +31,11 @@ TRAIN = True
 LOAD_MODEL = False
 RENDER_EVAL = True
 
-N_ENVS = 50                    # parallel MuJoCo worker processes during training
-N_STEPS = 1024                # rollout length per env per PPO update (N_ENVS*N_STEPS/update)
-TOTAL_TIMESTEPS = 100_000_000
+N_ENVS = 8                  # parallel MuJoCo worker processes during training
+N_STEPS = 128                # rollout length per env per PPO update (N_ENVS*N_STEPS/update)
+TOTAL_TIMESTEPS = 3_000_000
 CHECKPOINT_FREQ = 25_000      # in total env steps across all workers
-EVAL_EPISODES = 100
+EVAL_EPISODES = 10
 SEED = 0
 
 MODEL_PATH = RESULTS_DIR / "ppo_obstacle.zip"

@@ -6,13 +6,16 @@ import numpy as np
 # SETTINGS
 # ============================================================
 
-VIDEO_PATH = "obstacles.mp4"
-OUT_PATH = "obstacles_frames_fade.png"
+# VIDEO_PATH = "obstacles.mp4"
+# OUT_PATH = "obstacles_frames_fade.png"
+
+VIDEO_PATH = "wheelie_1.mp4"
+OUT_PATH = "wheelie_frames.png"
 
 # Frames used for the sequence
 # SELECTED_FRAMES = [55, 60, 70, 105, 140, 175, 210, 220]
 
-SELECTED_FRAMES = [55, 70, 85, 105, 120, 145, 170, 210]
+SELECTED_FRAMES = [0, 8, 16, 24, 32, 40, 48, 60]
 
 # 0.0 = completely white
 # 1.0 = original vehicle color
