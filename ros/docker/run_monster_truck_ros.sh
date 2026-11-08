@@ -3,7 +3,7 @@ set -e
 
 IMAGE_NAME="monster_truck_ros:v1"
 CONTAINER_NAME="monster_truck_ros"
-DOCKERFILE="monster_truck.Dockerfile"
+DOCKERFILE="monster_truck_jetson.Dockerfile"
 
 FORCE_BUILD=false
 
