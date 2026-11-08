@@ -110,17 +110,32 @@ class ImuSerialNode(Node):
         
         self.euler_pub.publish(msg)
 
+
 def main(args=None):
     rclpy.init(args=args)
     node = ImuSerialNode()
+
     try:
         rclpy.spin(node)
+
     except KeyboardInterrupt:
         pass
+
     finally:
-        node.ser.close()
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.ser.write(b"1500\n")
+            node.ser.flush()
+            node.get_logger().info("Sent PWM = 0")
+
+        except serial.SerialException as e:
+            node.get_logger().error(f"Failed to send stop command: {e}")
+
+        finally:
+            node.ser.close()
+            node.destroy_node()
+
+            if rclpy.ok():
+                rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

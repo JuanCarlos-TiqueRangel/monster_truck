@@ -5,6 +5,9 @@ from geometry_msgs.msg import Vector3Stamped
 from std_msgs.msg import Int32
 import numpy as np
 
+import time
+from rclpy.signals import SignalHandlerOptions
+
 class PitchPidController(Node):
     def __init__(self):
         super().__init__('pitch_pid_controller')
@@ -12,9 +15,9 @@ class PitchPidController(Node):
         # ============================================================
         # PID TUNING PARAMETERS
         # ============================================================
-        self.Kp = 3.8
+        self.Kp = 3.5
         self.Ki = 2.0
-        self.Kd = 0.5
+        self.Kd = 0.2
         
         self.target_pitch = -63.0
         
@@ -86,16 +89,32 @@ class PitchPidController(Node):
         # DO NOT use print() inside a 100Hz loop. Use throttle loggers instead:
         self.get_logger().info(f"Error: {error:.2f} | Out: {target_pwm}", throttle_duration_sec=0.05)
 
+
 def main(args=None):
-    rclpy.init(args=args)
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = PitchPidController()
+
     try:
         rclpy.spin(node)
+
     except KeyboardInterrupt:
         pass
+
     finally:
+        node.timer.cancel()
+
+        pwm_msg = Int32()
+        pwm_msg.data = 1500
+
+        for _ in range(20):
+            node.pwm_pub.publish(pwm_msg)
+            time.sleep(0.02)
+
+        node.get_logger().info("STOP: PWM = 1500")
+
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
