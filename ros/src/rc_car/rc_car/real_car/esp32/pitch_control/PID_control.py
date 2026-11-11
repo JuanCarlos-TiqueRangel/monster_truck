@@ -15,9 +15,9 @@ class PitchPidController(Node):
         # ============================================================
         # PID TUNING PARAMETERS
         # ============================================================
-        self.Kp = 3.5
-        self.Ki = 2.0
-        self.Kd = 0.2
+        self.Kp = 3.6420
+        self.Ki = 3.540
+        self.Kd = 0.340
         
         self.target_pitch = -63.0
         
@@ -27,10 +27,10 @@ class PitchPidController(Node):
         self.PWM_MAX = 2000
         
         # Fixed Loop Timing Constants (100Hz -> 0.01s)
-        self.LOOP_PERIOD = 0.01 
+        self.LOOP_PERIOD = 1/250 
         
         # Working State Variables
-        self.current_pitch = 0.0
+        self.current_pitch = None
         self.integral = 0.0
         self.last_error = 0.0
         self.first_run = True
@@ -49,6 +49,10 @@ class PitchPidController(Node):
         self.current_pitch = msg.vector.y
 
     def control_loop_callback(self):
+
+        if self.current_pitch is None:
+            return
+
         """Synchronous 100Hz execution loop: Runs independent of serial arrival jitter."""
         # Use a fixed, stable dt representing our 100Hz loop interval
         dt = self.LOOP_PERIOD

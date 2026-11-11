@@ -1,11 +1,12 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 # ============================================================
 # SETTINGS
 # ============================================================
 
-CSV_FILE = "wheelie_001.csv"
+CSV_FILE = "wheelie_20261111_225230.csv"
 PITCH_REF = -64.0
 
 # ============================================================
@@ -35,7 +36,7 @@ ax[0].grid(True)
 
 # Pitch angular velocity
 ax[1].plot(t, omega, label="Pitch Rate", linewidth=2)
-ax[1].axhline(0, color="red", linestyle="--", label="Reference")
+# ax[1].axhline(0, color="red", linestyle="--", label="Reference")
 ax[1].set_ylabel("Pitch Rate (rad/s)")
 ax[1].set_title("Pitch Angular Velocity")
 ax[1].legend()
@@ -51,4 +52,9 @@ ax[2].legend()
 ax[2].grid(True)
 
 plt.tight_layout()
+
+output = Path(CSV_FILE).with_suffix("")
+fig.savefig(f"{output}.png", dpi=300, bbox_inches="tight")
+fig.savefig(f"{output}.pdf", bbox_inches="tight")
+
 plt.show()

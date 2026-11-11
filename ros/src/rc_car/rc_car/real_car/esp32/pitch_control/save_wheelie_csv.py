@@ -1,66 +1,66 @@
-"""
-Saves the car's logged data (sent after X, relayed by the PC ESP32) to a .csv file.
 
-Usage:
-    pip install pyserial
-    Set PORT below, then run:  python log_pitch.py   (or the Run button in your IDE)
+#!/usr/bin/env python3
 
-Type S + Enter to start the PID, X + Enter to stop it.
-After X the car sends everything it recorded; the rows are written to the CSV.
-Several S/X runs go into the same file (column "run").
-Ctrl+C sends X (safety stop), waits for the data, then closes the file.
-Close the Arduino Serial Monitor first: only one program can open the port.
-"""
-import sys
-import threading
-import time
-
+import csv
 import serial
+from pathlib import Path
+from datetime import datetime
+from threading import Thread
 
 # ============================================================
 # SETTINGS
 # ============================================================
-PORT = "/dev/ttyACM0"    # serial port of the PC ESP32. Windows: "COM5", Linux: "/dev/ttyACM0", Mac: "/dev/cu.usbmodem101"
-out = time.strftime("pitch_%Y%m%d_%H%M%S.csv")   # a new file every time you run the script
 
-ser = serial.Serial(PORT, 115200, timeout=0.1)
-time.sleep(2.0)            # in case opening the port reset the board
-ser.reset_input_buffer()
+PORT = "/dev/ttyACM0"
+BAUD = 115200
+SAVE_DIR = Path(__file__).resolve().parent / "wheelie_logs"
 
+# ============================================================
+# MAIN
+# ============================================================
 
-def keyboard():
-    for line in sys.stdin:     # ends quietly if stdin closes (e.g. Ctrl+C on Windows)
-        c = line.strip().upper()
-        if c in ("S", "X"):
-            ser.write(c.encode())
+SAVE_DIR.mkdir(parents=True, exist_ok=True)
+filename = SAVE_DIR / f"wheelie_{datetime.now():%Y%m%d_%H%M%S}.csv"
 
+def send_commands(ser):
+    while True:
+        command = input().strip().upper()
 
-def handle(line, f):
-    if line.startswith("D,"):
-        f.write(line[2:] + "\n")
-    elif line:
-        print(line)        # status messages from the ESP32
+        if command in ("S", "X"):
+            ser.write(command.encode("ascii"))
 
+with serial.Serial(PORT, BAUD, timeout=0.1) as ser:
+    
+    Thread(target=send_commands, args=(ser,), daemon=True).start()
 
-threading.Thread(target=keyboard, daemon=True).start()
+    with filename.open("w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["time_us", "pitch_deg", "omega_rad_s", "pwm_us"])
 
-with open(out, "w", newline="", buffering=1) as f:   # line-buffered: rows reach disk as they arrive
-    f.write("run,t_ms,pitch_deg,pitch_rate_dps,pwm_us\n")
-    print(f"Logging to {out}. S = start, X = stop + send data, Ctrl+C = quit")
-    try:
-        while True:
-            handle(ser.readline().decode(errors="ignore").strip(), f)
-    except KeyboardInterrupt:
-        ser.write(b"X")
-        print("Ctrl+C: sent X, waiting for the car's data...")
-        last = time.time()
-        while time.time() - last < 2.0:        # give up after 2 s with nothing received
-            line = ser.readline().decode(errors="ignore").strip()
-            if line:
-                last = time.time()
-                handle(line, f)
-                if "samples received" in line:
-                    break
-        print(f"Saved {out}")
+        print(f"Recording: {filename}")
+        samples = 0
 
-ser.close()
+        try:
+            while True:
+                line = ser.readline().decode("utf-8", errors="replace").strip()
+                data = line.split(",")
+
+                if len(data) != 4:
+                    continue
+
+                try:
+                    t = int(data[0])
+                    pitch = float(data[1])
+                    omega = float(data[2])
+                    pwm = int(data[3])
+                except ValueError:
+                    continue
+
+                writer.writerow([t, pitch, omega, pwm])
+                samples += 1
+
+                if samples % 100 == 0:
+                    file.flush()
+
+        except KeyboardInterrupt:
+            print(f"\nSaved {samples} samples to {filename}")

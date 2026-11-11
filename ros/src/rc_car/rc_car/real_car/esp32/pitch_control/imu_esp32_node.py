@@ -23,7 +23,8 @@ class ImuSerialNode(Node):
         self.frame_id = self.get_parameter('frame_id').value
         
         try:
-            self.ser = serial.Serial(port, baudrate, timeout=1.0)
+            self.ser = serial.Serial(port, baudrate, timeout=0, write_timeout=0.01)
+            self.rx_buffer = bytearray()
             self.get_logger().info(f"Opened port: {port} at {baudrate} baud.")
         except serial.SerialException as e:
             self.get_logger().error(f"Failed to open port {port}: {e}")
@@ -42,31 +43,47 @@ class ImuSerialNode(Node):
         self.timer = self.create_timer(timer, self.serial_read_callback) 
 
     def pwm_callback(self, msg):
-        """Intercepts the calculation from your PID node and pipes it down the wire."""
         try:
-            command_string = f"{msg.data}\n"
-            self.ser.write(command_string.encode('utf-8'))
-        except Exception as e:
-            self.get_logger().error(f"Failed to relay command to ESP32: {e}")
+            command = f"{msg.data}\n".encode("ascii")
+            self.ser.write(command)
+
+        except (serial.SerialException, serial.SerialTimeoutException, OSError) as e:
+            self.get_logger().error(f"Serial write failed: {e}")
         
 
 
     def serial_read_callback(self):
-        if self.ser.in_waiting > 0:
-            try:
-                line = self.ser.readline().decode('utf-8').strip()
-                data = [float(val) for val in line.split(',')]
-                
-                # Expecting 13 values: ax,ay,az, gx,gy,gz, qw,qx,qy,qz, roll,pitch,yaw
-                if len(data) == 13:
-                    current_time = self.get_clock().now().to_msg()
-                    self.publish_imu(data, current_time)
-                    self.publish_euler(data, current_time)
-                    
-            except ValueError:
-                pass 
-            except Exception as e:
-                self.get_logger().error(f"Serial error: {e}")
+        try:
+            n = self.ser.in_waiting
+            if n == 0:
+                return
+
+            self.rx_buffer.extend(self.ser.read(n))
+
+            while b"\n" in self.rx_buffer:
+                raw, _, remaining = self.rx_buffer.partition(b"\n")
+                self.rx_buffer = bytearray(remaining)
+
+                fields = raw.decode("utf-8", errors="replace").strip().split(",")
+
+                if len(fields) != 13:
+                    continue
+
+                try:
+                    data = list(map(float, fields))
+                except ValueError:
+                    continue
+
+                current_time = self.get_clock().now().to_msg()
+                self.publish_imu(data, current_time)
+                self.publish_euler(data, current_time)
+
+            if len(self.rx_buffer) > 4096:
+                self.rx_buffer.clear()
+                self.get_logger().warning("Serial buffer overflow; discarding incomplete data")
+
+        except (serial.SerialException, OSError) as e:
+            self.get_logger().error(f"Serial read failed: {e}")
 
                 
 
@@ -123,8 +140,9 @@ def main(args=None):
 
     finally:
         try:
-            node.ser.write(b"1500\n")
-            node.ser.flush()
+            for _ in range(20):
+                node.ser.write(b"1500\n")
+                node.ser.flush()
             node.get_logger().info("Sent PWM = 0")
 
         except serial.SerialException as e:
